@@ -1,0 +1,15 @@
+# 统一按 LF 存储，工作区保持各平台习惯
+* text=auto eol=lf
+
+# Xcode 工程文件按文本处理，避免 diff 失效
+*.pbxproj text eol=lf
+*.xcconfig text eol=lf
+*.plist text eol=lf
+*.swift text eol=lf
+
+# 二进制文件：不做行尾转换，不进 diff
+Threxo/Threxo/Resources/7zz binary
+M0/bin/7zz binary
+*.icns binary
+*.png binary
+*.dmg binary
