@@ -1,0 +1,31 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+xcuserdata/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# 本仓库不收录的本地素材
+# 模仿产品/  —— 竞品安装包，版权与体积原因不入库
+# ThrexoAssets/ —— 早期手工素材包，内容已并入 Threxo/ 工程
+# M0/bin/m0verify —— SwiftPM 编译产物
+# project.xcproj.bak —— Xcode 新格式工程的临时备份
+模仿产品/
+ThrexoAssets/
+M0/bin/
+M0/m0verify
+project.xcproj.bak
+
+# 工具与会话数据
+.workbuddy/
