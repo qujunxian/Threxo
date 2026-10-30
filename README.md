@@ -75,7 +75,7 @@ open Threxo/Threxo.xcodeproj
 xcodebuild -project Threxo/Threxo.xcodeproj -scheme Threxo -configuration Debug build
 ```
 
-签名使用自动签名。工程里 `DEVELOPMENT_TEAM` 写的是开发者本人的 Team ID，**换机器后需要在两个 target 的 Signing & Capabilities 里改成自己的 Team**，否则无法构建。
+签名使用自动签名。工程里 `DEVELOPMENT_TEAM = T9DDF2YTVH`，对应证书 `Apple Development: qu18769592321@icloud.com (KNMDZMAWRG)`，两者已核实匹配。**换机器后需要在两个 target 的 Signing & Capabilities 里改成自己的 Team**，否则无法构建。
 
 `7zz` 以二进制形式随包提交（`Threxo/Threxo/Resources/7zz`，7-Zip 26.04，x86_64 + arm64）。工程里有一条 Run Script 在构建时给它补 `chmod +x` 与 hardened runtime 重签，因为嵌套的可执行文件不重签会直接被 Gatekeeper 拦掉。
 
@@ -107,7 +107,7 @@ killall pkd
 
 - 归档引擎：[7-Zip](https://www.7-zip.org/)（`7zz` 26.04），遵循 7-Zip License，全文见 `Threxo/Threxo/Resources/7zip-License.txt`。
 - 7-Zip 内含 unRAR 代码，其分发限制已在 `THIRD_PARTY_NOTICES.md` 说明。
-- 本仓库代码暂未附开源许可文件。
+- 本仓库为专有代码，版权归作者所有，未经书面许可不得复制、分发或商用，详见 `LICENSE`。
 
 ## 文档
 

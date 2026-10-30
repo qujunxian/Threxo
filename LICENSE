@@ -1,0 +1,25 @@
+Copyright (c) 2026 曲俊现 (qujunxian). All rights reserved.
+
+千梭 / Threxo 为专有软件，本仓库中的源代码、设计文档与相关材料
+均为作者的知识产权。除以下情形外，未经作者书面许可，不得复制、
+修改、分发、再许可或用于商业用途：
+
+1. 在 GitHub 上浏览、克隆仓库以进行个人学习或评估；
+2. 依据适用法律明确允许的使用方式。
+
+本软件按「现状」提供，不附任何明示或暗示的担保，包括但不限于
+适销性、特定用途适用性与不侵权的担保。因使用本软件产生的任何
+直接或间接损失，作者不承担责任。
+
+---
+
+第三方组件
+
+本仓库随包分发 7-Zip 的命令行程序 `7zz`（`Threxo/Threxo/Resources/7zz`），
+其版权归 Igor Pavlov 所有，遵循 7-Zip License，全文见
+`Threxo/Threxo/Resources/7zip-License.txt`。
+
+7-Zip 内含 unRAR 代码，其使用与分发限制见
+`Threxo/Threxo/Resources/THIRD_PARTY_NOTICES.md`。
+
+上述第三方组件的许可条款优先于本声明中与其冲突的部分。
