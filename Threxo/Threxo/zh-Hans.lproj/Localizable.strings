@@ -9,6 +9,5 @@
 /* ===== 系统面板：压缩（选择源 + 保存位置）===== */
 "panel.compress.select.message" = "选择要压缩的文件或文件夹";
 "panel.compress.select.prompt" = "下一步";
-"panel.compress.save.message" = "选择 ZIP 保存位置";
+"panel.compress.save.message" = "选择归档保存位置";
 "panel.compress.save.prompt" = "压缩";
-"panel.compress.defaultName" = "归档.zip";

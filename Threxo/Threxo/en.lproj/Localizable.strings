@@ -19,9 +19,8 @@
 /* ===== 系统面板：压缩（选择源 + 保存位置）===== */
 "panel.compress.select.message" = "Choose files or folders to compress";
 "panel.compress.select.prompt" = "Next";
-"panel.compress.save.message" = "Choose where to save the ZIP";
+"panel.compress.save.message" = "Choose where to save the archive";
 "panel.compress.save.prompt" = "Compress";
-"panel.compress.defaultName" = "Archive.zip";
 
 /* ===== 主界面：标题与副标题 ===== */
 "就绪" = "Ready";
@@ -30,7 +29,7 @@
 
 /* ===== 主界面：空状态 ===== */
 "把压缩包拖到这里" = "Drop an archive here";
-"也可以直接拖入文件或文件夹，立即打包成 ZIP" = "You can also drop files or folders to zip them right away";
+"也可以直接拖入文件或文件夹，立即打包成 %@" = "You can also drop files or folders to pack them as %@ right away";
 
 /* ===== 主界面：访达扩展提示条 ===== */
 "访达右键菜单尚未启用" = "Finder context menu is off";
@@ -81,3 +80,39 @@
 "用千梭解压 %d 个归档" = "Extract %d Archives with Threxo";
 "用千梭压缩" = "Compress with Threxo";
 "用千梭压缩 %d 项" = "Compress %d Items with Threxo";
+
+/* ===== 压缩格式与设置 ===== */
+"压缩设置" = "Compression Settings";
+"选择压缩格式" = "Choose archive format";
+"压缩格式" = "Archive Format";
+"存储" = "Store";
+"快速" = "Fast";
+"正常" = "Normal";
+"慢速" = "Slow";
+"压缩方式：" = "Level: ";
+"TAR 只打包不压缩，没有压缩级别。" = "TAR only packs files and does not compress, so there is no level.";
+"密码：" = "Password:";
+"重复：" = "Repeat:";
+"密码" = "Password";
+"解锁" = "Unlock";
+"使用 AES-256 加密" = "Use AES-256 encryption";
+"7Z 固定使用 AES-256 加密" = "7Z always uses AES-256 encryption";
+"%@ 格式不支持加密" = "%@ archives cannot be encrypted";
+"两次输入的密码不一致" = "The two passwords don't match";
+"密码只保留在本次运行中，不会写入磁盘。" = "The password is kept only for this run and is never written to disk.";
+"排除 Mac 资源文件" = "Exclude macOS resource files";
+"压缩完成后把源文件移到废纸篓" = "Move source files to Trash after compression";
+"源文件会进废纸篓，可从废纸篓恢复。" = "Source files go to the Trash, where you can restore them.";
+"压缩完成后将把 %d 个源文件移到废纸篓" = "This will move %d source items to the Trash after compression";
+"仅在压缩成功后执行，文件可从废纸篓恢复。" = "Only runs after a successful compression. The items can be restored from the Trash.";
+"继续压缩" = "Continue";
+"压缩完成 → %@（%d 个源文件已移到废纸篓）" = "Compression complete → %@ (%d source items moved to Trash)";
+"移到废纸篓失败：%@" = "Couldn't move to the Trash: %@";
+"解压支持：%@" = "Extracts: %@";
+"可创建的格式取决于内置 7-Zip，未列出的格式不支持压缩。" = "Creatable formats depend on the bundled 7-Zip. Formats not listed cannot be created.";
+
+/* ===== 密码提示 ===== */
+"需要密码" = "Password Required";
+"密码不正确" = "Incorrect Password";
+"这个归档已加密，需要密码才能解压。" = "This archive is encrypted. Enter its password to extract it.";
+"这个归档的密码不对，请重新输入。" = "That password didn't work. Please try again.";

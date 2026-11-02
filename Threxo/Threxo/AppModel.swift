@@ -40,8 +40,26 @@ final class AppModel: ObservableObject {
     /// 由 pkd 提供，状态可能滞后数秒，界面上提供手动刷新。
     @Published var finderExtensionEnabled = false
 
+    /// 压缩设置（格式 / 级别 / 密码 / 排除 / 删源），与界面共享同一实例。
+    let options = CompressionOptions.shared
+
+    /// 解压加密归档时的密码框；非 nil 表示正在等用户输入。
+    @Published var passwordPrompt: PasswordPrompt?
+
+    /// 本次归档已确认可用的密码，只存在内存里，切换归档即清空。
+    private var archivePassword: String?
+    /// 归档是否含加密条目（来自 `l -slt` 的 `Encrypted = +`）。
+    private var archiveEncrypted = false
+    private var passwordContinuation: CheckedContinuation<String?, Never>?
+
     private var activeProcess: Process?
     private let runner: SevenZipRunner
+
+    struct PasswordPrompt: Identifiable {
+        let id = UUID()
+        let title: String
+        let message: String
+    }
 
     init() {
         guard let url = Bundle.main.url(forResource: "7zz", withExtension: nil) else {
@@ -110,34 +128,60 @@ final class AppModel: ObservableObject {
         entries = []
         treeNodes = []
         selection = []
+        archivePassword = nil
+        archiveEncrypted = false
         statusText = L("正在读取归档…")
 
-        let runner = self.runner
-        Task.detached(priority: .userInitiated) {
-            var out = ""
-            var err = ""
-            let code = (try? runner.run(
-                arguments: ["l", "-slt", "-ba", url.path],
-                onLine: { out += $0 + "\n" },
-                onError: { err += $0 + "\n" }
-            )) ?? -1
+        Task { @MainActor in
+            var password: String?
+            var attempt = 0
+            var cancelled = false
+            var result = await list(url, password: nil)
 
-            let parsed = code == 0 ? ArchiveLister.parse(out) : []
-            let tree = ArchiveTree.build(parsed)
-            await MainActor.run {
-                self.isBusy = false
-                if code == 0 {
-                    self.entries = parsed
-                    self.treeNodes = tree
-                    let files = parsed.reduce(0) { $0 + ($1.isDirectory ? 0 : 1) }
-                    self.statusText = String(format: L("已加载 %@ · %d 个文件"), url.lastPathComponent, files)
-                } else {
-                    self.errorMessage = String(format: L("读取归档失败：%@"), Self.describe(exitCode: code))
-                    self.statusText = L("读取失败")
-                    if !err.isEmpty { self.currentItem = nil }
+            // 头部加密的 7z、以及带密码的 zip，连列目录都会失败；
+            // 这里先索要密码再重试，最多三轮，避免用户误输入后死循环。
+            while result.code != 0, Self.isPasswordError(result.error), attempt < 3 {
+                attempt += 1
+                guard let entered = await self.askPassword(isRetry: attempt > 1) else {
+                    cancelled = true
+                    break
                 }
+                password = entered
+                result = await list(url, password: entered)
             }
+
+            self.finishLoading(url: url, result: result, password: password, cancelled: cancelled)
         }
+    }
+
+    /// 列归档。始终带 `-p`（空值），否则 7zz 会停下来等终端输入密码，进程直接卡住。
+    private func list(_ url: URL, password: String?) async -> (code: Int32, output: String, error: String) {
+        await runSync(["l", "-slt", "-ba", "-p\(password ?? "")", url.path])
+    }
+
+    private func finishLoading(
+        url: URL,
+        result: (code: Int32, output: String, error: String),
+        password: String?,
+        cancelled: Bool
+    ) {
+        isBusy = false
+        if cancelled && result.code != 0 {
+            statusText = L("已取消")
+            return
+        }
+        guard result.code == 0 else {
+            errorMessage = String(format: L("读取归档失败：%@"), Self.describe(exitCode: result.code))
+            statusText = L("读取失败")
+            return
+        }
+        archivePassword = password
+        archiveEncrypted = result.output.contains("Encrypted = +")
+        let parsed = ArchiveLister.parse(result.output)
+        entries = parsed
+        treeNodes = ArchiveTree.build(parsed)
+        let files = parsed.reduce(0) { $0 + ($1.isDirectory ? 0 : 1) }
+        statusText = String(format: L("已加载 %@ · %d 个文件"), url.lastPathComponent, files)
     }
 
     /// 双击归档 / 拖到 Dock 图标 / 「打开方式」都会走到这里。
@@ -252,6 +296,11 @@ final class AppModel: ObservableObject {
     func compress() {
         guard !isBusy else { return }
 
+        if let mismatch = options.passwordValidationMessage {
+            errorMessage = mismatch
+            return
+        }
+
         let open = NSOpenPanel()
         open.canChooseFiles = true
         open.canChooseDirectories = true
@@ -262,33 +311,43 @@ final class AppModel: ObservableObject {
         let sources = open.urls
 
         let save = NSSavePanel()
-        save.nameFieldStringValue = NSLocalizedString("panel.compress.defaultName", comment: "压缩保存面板的默认文件名")
+        // 默认文件名跟着格式走：选 GZIP 就是 abc.tar.gz，不会出现 a.zip 里装 gzip 的错配。
+        save.nameFieldStringValue = "\(Self.defaultArchiveBase(for: sources)).\(options.format.fileExtension)"
         save.message = NSLocalizedString("panel.compress.save.message", comment: "压缩保存面板的提示语")
         save.prompt = NSLocalizedString("panel.compress.save.prompt", comment: "压缩保存面板的确认按钮")
         save.canCreateDirectories = true
-        guard save.runModal() == .OK, let dest = save.url else { return }
+        guard save.runModal() == .OK, let chosen = save.url else { return }
+
+        // 保存面板里可能被改成不带后缀的名字，补回来，保证产物能被正常识别。
+        let suffix = "." + options.format.fileExtension
+        let dest = chosen.path.hasSuffix(suffix)
+            ? chosen
+            : URL(fileURLWithPath: chosen.path + suffix)
 
         compress(sources: sources, to: dest)
     }
 
-    /// FinderSync flow: zip the given items next to the first one.
+    /// FinderSync flow: 用当前设置把项目压到第一个项目旁边。
     /// 不覆盖已有归档：同名时自动追加序号（a.zip → a 2.zip），避免静默丢数据。
     func compressAutomatically(_ urls: [URL]) {
         guard !isBusy, !urls.isEmpty else { return }
         let dir = urls[0].deletingLastPathComponent()
-        let stem = urls[0].deletingPathExtension().lastPathComponent
-        let base = stem.isEmpty ? L("归档") : stem
+        let base = Self.defaultArchiveBase(for: urls)
+        let ext = options.format.fileExtension
 
-        var dest = dir.appendingPathComponent("\(base).zip")
+        var dest = dir.appendingPathComponent("\(base).\(ext)")
         var counter = 2
         while FileManager.default.fileExists(atPath: dest.path) {
-            dest = dir.appendingPathComponent("\(base) \(counter).zip")
+            dest = dir.appendingPathComponent("\(base) \(counter).\(ext)")
             counter += 1
         }
         compress(sources: urls, to: dest)
     }
 
     private func compress(sources: [URL], to dest: URL) {
+        // 勾了「压缩完成后删源文件」时先确认一次，默认按钮是取消。
+        guard confirmSourceRemovalIfNeeded(sources: sources) else { return }
+
         if FileManager.default.fileExists(atPath: dest.path) {
             try? FileManager.default.removeItem(at: dest)
         }
@@ -298,7 +357,15 @@ final class AppModel: ObservableObject {
             if code == 0 {
                 self.progress = 100  // 7zz 不保证打到 100%，成功后补齐。
                 self.currentItem = nil
-                self.statusText = String(format: L("压缩完成 → %@"), dest.path)
+                var message = String(format: L("压缩完成 → %@"), dest.path)
+                if self.options.deleteSourceAfterCompress {
+                    let moved = self.moveToTrash(sources: sources, destination: dest)
+                    if moved > 0 {
+                        message = String(format: L("压缩完成 → %@（%d 个源文件已移到废纸篓）"), dest.path, moved)
+                    }
+                }
+                self.statusText = message
+                self.options.resetPassword()
                 self.load(archive: dest)
             } else {
                 self.statusText = code == 255 ? L("已取消") : L("压缩失败")
@@ -307,16 +374,77 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// 压缩后删源文件属于不可轻易撤销的操作，即使设置里已经勾选也要再确认一次。
+    private func confirmSourceRemovalIfNeeded(sources: [URL]) -> Bool {
+        guard options.deleteSourceAfterCompress else { return true }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = String(format: L("压缩完成后将把 %d 个源文件移到废纸篓"), sources.count)
+        alert.informativeText = L("仅在压缩成功后执行，文件可从废纸篓恢复。")
+        // 第一个按钮是默认按钮：把「取消」放在默认位，避免误触即删。
+        alert.addButton(withTitle: L("取消"))
+        alert.addButton(withTitle: L("继续压缩"))
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
+    /// 移到废纸篓而不是永久删除，用户随时可以从废纸篓找回。
+    /// 归档若就在被压缩的目录里，跳过那一项，否则会连结果一起丢掉。
+    @discardableResult
+    private func moveToTrash(sources: [URL], destination: URL) -> Int {
+        var moved = 0
+        for url in sources {
+            if destination.path.hasPrefix(url.path + "/") { continue }
+            var resulting: NSURL?
+            do {
+                try FileManager.default.trashItem(at: url, resultingItemURL: &resulting)
+                moved += 1
+            } catch {
+                errorMessage = String(format: L("移到废纸篓失败：%@"), error.localizedDescription)
+            }
+        }
+        return moved
+    }
+
     // MARK: - Blocking 7zz operations (run off the main thread)
 
     private func extractBlocking(archive: URL, to dest: URL, items: [String]) async -> Int32 {
+        // 已知有加密条目但还没拿到密码：先问，省掉一次必然失败的解压。
+        if archiveEncrypted, archivePassword == nil {
+            guard let entered = await askPassword(isRetry: false) else { return 255 }
+            archivePassword = entered
+        }
+
+        var result = await runExtract(archive: archive, to: dest, items: items, password: archivePassword)
+
+        // 兜底：有些归档的加密条目在列目录时看不出（例如加密的 rar），
+        // 跑到一半才报错，这时再问一次并重跑。
+        if result.code != 0, Self.isPasswordError(result.error) {
+            guard let entered = await askPassword(isRetry: archivePassword != nil) else { return 255 }
+            archivePassword = entered
+            result = await runExtract(archive: archive, to: dest, items: items, password: entered)
+        }
+
+        if result.code == 0 {
+            await expandIntermediateTar(archive: archive, destination: dest)
+        }
+        return result.code
+    }
+
+    private func runExtract(
+        archive: URL,
+        to dest: URL,
+        items: [String],
+        password: String?
+    ) async -> (code: Int32, error: String) {
         let runner = self.runner
-        var args = ["x", archive.path, "-o\(dest.path)", "-y", "-bsp1", "-bb1"]
+        var args = ["x", archive.path, "-o\(dest.path)", "-y", "-bsp1", "-bb1", "-p\(password ?? "")"]
         args.append(contentsOf: items)
 
         return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 var code: Int32 = -1
+                var errorText = ""
                 do {
                     let process = try runner.start(
                         arguments: args,
@@ -329,47 +457,139 @@ final class AppModel: ObservableObject {
                                 }
                             }
                         },
-                        onError: { _ in }
+                        onError: { line in
+                            errorText += line + "\n"
+                        }
                     )
-                    DispatchQueue.main.async { self.activeProcess = process }
+                    DispatchQueue.main.async { self?.activeProcess = process }
                     process.waitUntilExit()
                     code = process.terminationStatus
                 } catch {
-                    DispatchQueue.main.async { self.errorMessage = "\(error)" }
+                    DispatchQueue.main.async { self?.errorMessage = "\(error)" }
+                }
+                continuation.resume(returning: (code, errorText))
+            }
+        }
+    }
+
+    /// `.tar.gz` / `.tar.bz2` / `.tar.xz` 是「压缩器套 tar」，7zz 只会解开外层，
+    /// 留下一个 `.tar`。这里把中间那一层也拆开，用户直接拿到内容。
+    private func expandIntermediateTar(archive: URL, destination: URL) async {
+        let ext = archive.pathExtension.lowercased()
+        guard ["gz", "bz2", "xz", "z", "tgz", "tbz", "tbz2", "txz"].contains(ext) else { return }
+
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: destination,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        // 只有「恰好解出一个 .tar」才继续，避免误伤同名内容。
+        guard contents.count == 1,
+              let tar = contents.first,
+              tar.pathExtension.lowercased() == "tar" else { return }
+
+        let result = await runSync(["x", tar.path, "-o\(destination.path)", "-y", "-bso0", "-bsp0", "-p"])
+        if result.code == 0 {
+            // 中间产物是刚才这一步自己解出来的，展开后清掉，不留在用户目录里。
+            try? FileManager.default.removeItem(at: tar)
+        }
+    }
+
+    private func compressBlocking(sources: [URL], to dest: URL) async -> Int32 {
+        // gzip / bzip2 / xz 一次只能压一个文件流，目录或多项必须先打 tar。
+        if options.format.isSingleStream, sources.count > 1 || sources.contains(where: Self.isDirectory) {
+            return await compressViaTar(sources: sources, to: dest)
+        }
+        return await runCompress(sources: sources, to: dest, progressRange: 0...100)
+    }
+
+    private func runCompress(sources: [URL], to dest: URL, progressRange: ClosedRange<Int>) async -> Int32 {
+        var args = ["a", dest.path]
+        args.append(contentsOf: options.extraArguments())
+        args.append(contentsOf: ["-bsp1", "-bb1"])
+        args.append(contentsOf: sources.map(\.path))
+        return await runWithProgress(args, progressRange: progressRange)
+    }
+
+    /// 两步走：先打 tar，再用 gzip/bzip2/xz 压。
+    /// 产物是标准的 `.tar.gz` / `.tar.bz2` / `.tar.xz`，解压时由
+    /// `expandIntermediateTar` 还原成内容。
+    private func compressViaTar(sources: [URL], to dest: URL) async -> Int32 {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Threxo-\(UUID().uuidString)", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        } catch {
+            errorMessage = error.localizedDescription
+            return -1
+        }
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let tarURL = tmpDir.appendingPathComponent("payload.tar")
+        var tarArgs = ["a", tarURL.path, "-ttar"]
+        if options.excludeMacResources {
+            tarArgs.append(contentsOf: CompressionOptions.macResourceExcludes)
+        }
+        tarArgs.append(contentsOf: ["-bso0", "-bsp0"])
+        tarArgs.append(contentsOf: sources.map(\.path))
+
+        let tarCode = await runWithProgress(tarArgs, progressRange: 0...50)
+        guard tarCode == 0 else { return tarCode }
+
+        var args = ["a", dest.path, options.format.typeFlag]
+        if options.format.supportsLevel {
+            args.append("-mx=\(options.level.mx)")
+        }
+        args.append(contentsOf: ["-bsp1", "-bb1", tarURL.path])
+        return await runWithProgress(args, progressRange: 50...100)
+    }
+
+    /// 跑一次 7zz 并把百分比映射到 `progressRange` 区间（两步流程用）。
+    private func runWithProgress(_ args: [String], progressRange: ClosedRange<Int>) async -> Int32 {
+        let runner = self.runner
+        let span = Double(progressRange.upperBound - progressRange.lowerBound)
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                var code: Int32 = -1
+                do {
+                    let process = try runner.start(
+                        arguments: args,
+                        onProgress: { [weak self] event in
+                            let mapped = progressRange.lowerBound + Int(Double(event.percent) / 100.0 * span)
+                            DispatchQueue.main.async {
+                                guard let self else { return }
+                                if self.progress < mapped { self.progress = mapped }
+                                if let item = SevenZipRunner.parseCurrentItem(event.raw) {
+                                    self.currentItem = item
+                                }
+                            }
+                        },
+                        onError: { _ in }
+                    )
+                    DispatchQueue.main.async { self?.activeProcess = process }
+                    process.waitUntilExit()
+                    code = process.terminationStatus
+                } catch {
+                    DispatchQueue.main.async { self?.errorMessage = "\(error)" }
                 }
                 continuation.resume(returning: code)
             }
         }
     }
 
-    private func compressBlocking(sources: [URL], to dest: URL) async -> Int32 {
+    /// 同步跑一次 7zz，收集 stdout / stderr。用于列目录、拆中间 tar 这类短命令。
+    private func runSync(_ args: [String]) async -> (code: Int32, output: String, error: String) {
         let runner = self.runner
-        let args = ["a", dest.path, "-tzip", "-mx=5", "-bsp1", "-bb1"]
-            + sources.map(\.path)
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
-                var code: Int32 = -1
-                do {
-                    let process = try runner.start(
-                        arguments: args,
-                        onProgress: { [weak self] event in
-                            DispatchQueue.main.async {
-                                guard let self else { return }
-                                if self.progress < event.percent { self.progress = event.percent }
-                                if let item = SevenZipRunner.parseCurrentItem(event.raw) {
-                                    self.currentItem = item
-                                }
-                            }
-                        },
-                        onError: { _ in }
-                    )
-                    DispatchQueue.main.async { self.activeProcess = process }
-                    process.waitUntilExit()
-                    code = process.terminationStatus
-                } catch {
-                    DispatchQueue.main.async { self.errorMessage = "\(error)" }
-                }
-                continuation.resume(returning: code)
+                var out = ""
+                var err = ""
+                let code = (try? runner.run(
+                    arguments: args,
+                    onLine: { out += $0 + "\n" },
+                    onError: { err += $0 + "\n" }
+                )) ?? -1
+                continuation.resume(returning: (code, out, err))
             }
         }
     }
@@ -419,6 +639,50 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: - Helpers
+
+    /// 密码框：挂起等待用户输入，取消返回 nil。
+    @MainActor
+    private func askPassword(isRetry: Bool) async -> String? {
+        await withCheckedContinuation { continuation in
+            passwordContinuation = continuation
+            passwordPrompt = PasswordPrompt(
+                title: isRetry ? L("密码不正确") : L("需要密码"),
+                message: isRetry
+                    ? L("这个归档的密码不对，请重新输入。")
+                    : L("这个归档已加密，需要密码才能解压。")
+            )
+        }
+    }
+
+    func submitPassword(_ text: String) {
+        passwordPrompt = nil
+        passwordContinuation?.resume(returning: text.isEmpty ? nil : text)
+        passwordContinuation = nil
+    }
+
+    func cancelPassword() {
+        passwordPrompt = nil
+        passwordContinuation?.resume(returning: nil)
+        passwordContinuation = nil
+    }
+
+    /// 7zz 的两种密码报错：条目级 `Wrong password : path`，
+    /// 头部加密 `Cannot open encrypted archive. Wrong password?`。
+    static func isPasswordError(_ text: String) -> Bool {
+        let lowered = text.lowercased()
+        return lowered.contains("wrong password") || lowered.contains("cannot open encrypted archive")
+    }
+
+    static func isDirectory(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+    }
+
+    /// 默认归档名：单个项目用它自己的名字，多个项目用「归档」。
+    static func defaultArchiveBase(for urls: [URL]) -> String {
+        guard urls.count == 1, let first = urls.first else { return L("归档") }
+        let stem = first.deletingPathExtension().lastPathComponent
+        return stem.isEmpty ? L("归档") : stem
+    }
 
     /// 解压目标：归档同级的同名文件夹，已存在则依次尝试「名字 2」「名字 3」…，
     /// 绝不覆盖已有目录（避免解压把上一个结果覆盖掉）。
@@ -470,7 +734,7 @@ final class AppModel: ObservableObject {
 
     static let archiveExtensions: Set<String> = [
         "zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "tbz", "tbz2",
-        "xz", "txz", "zst", "lz", "lzma", "cab", "iso", "jar", "war",
+        "xz", "txz", "zst", "lz", "lzma", "cab", "iso", "wim", "jar", "war",
     ]
 
     /// 把 7-Zip 的退出码翻译成人话，替代裸露的 "退出码 2"。
