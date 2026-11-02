@@ -18,6 +18,8 @@
 		AA0000000000000000000017 /* THIRD_PARTY_NOTICES.md in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000018 /* THIRD_PARTY_NOTICES.md */; };
 		AA0000000000000000000019 /* ThrexoFinder.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000020 /* ThrexoFinder.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		AA0000000000000000000021 /* FinderSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000022 /* FinderSync.swift */; };
+		AA0000000000000000000061 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000062 /* InfoPlist.strings */; };
+		AA0000000000000000000063 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000064 /* Localizable.strings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -60,6 +62,10 @@
 		AA0000000000000000000022 /* FinderSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinderSync.swift; sourceTree = "<group>"; };
 		AA0000000000000000000029 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA0000000000000000000030 /* ThrexoFinder.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ThrexoFinder.entitlements; sourceTree = "<group>"; };
+		AA0000000000000000000065 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		AA0000000000000000000066 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
+		AA0000000000000000000067 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		AA0000000000000000000068 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -97,6 +103,8 @@
 				AA0000000000000000000002 /* AppModel.swift */,
 				AA0000000000000000000037 /* Core */,
 				AA0000000000000000000038 /* Resources */,
+				AA0000000000000000000062 /* InfoPlist.strings */,
+				AA0000000000000000000064 /* Localizable.strings */,
 				AA0000000000000000000028 /* Info.plist */,
 			);
 			path = Threxo;
@@ -200,11 +208,12 @@
 			};
 			buildConfigurationList = AA0000000000000000000047 /* Build configuration list for PBXProject "Threxo" */;
 			compatibilityVersion = "Xcode 14.0";
-			developmentRegion = en;
+			developmentRegion = "zh-Hans";
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
 				Base,
+				"zh-Hans",
 			);
 			mainGroup = AA0000000000000000000033;
 			productRefGroup = AA0000000000000000000036 /* Products */;
@@ -225,6 +234,8 @@
 				AA0000000000000000000013 /* 7zz in Resources */,
 				AA0000000000000000000015 /* 7zip-License.txt in Resources */,
 				AA0000000000000000000017 /* THIRD_PARTY_NOTICES.md in Resources */,
+				AA0000000000000000000061 /* InfoPlist.strings in Resources */,
+				AA0000000000000000000063 /* Localizable.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -283,6 +294,27 @@
 			targetProxy = AA0000000000000000000023 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		AA0000000000000000000062 /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				AA0000000000000000000065 /* zh-Hans */,
+				AA0000000000000000000066 /* en */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000064 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				AA0000000000000000000067 /* zh-Hans */,
+				AA0000000000000000000068 /* en */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
 		AA0000000000000000000048 /* Debug */ = {

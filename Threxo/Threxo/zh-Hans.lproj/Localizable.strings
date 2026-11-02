@@ -1,0 +1,14 @@
+/* ===== 系统面板：打开归档 ===== */
+"panel.openArchive.message" = "选择要打开的归档文件";
+"panel.openArchive.prompt" = "打开";
+
+/* ===== 系统面板：解压到… ===== */
+"panel.extractTo.message" = "选择解压目标文件夹";
+"panel.extractTo.prompt" = "解压到此处";
+
+/* ===== 系统面板：压缩（选择源 + 保存位置）===== */
+"panel.compress.select.message" = "选择要压缩的文件或文件夹";
+"panel.compress.select.prompt" = "下一步";
+"panel.compress.save.message" = "选择 ZIP 保存位置";
+"panel.compress.save.prompt" = "压缩";
+"panel.compress.defaultName" = "归档.zip";

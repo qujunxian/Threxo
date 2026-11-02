@@ -1,0 +1,14 @@
+/* ===== System panel: open archive ===== */
+"panel.openArchive.message" = "Choose an archive to open";
+"panel.openArchive.prompt" = "Open";
+
+/* ===== System panel: extract to… ===== */
+"panel.extractTo.message" = "Choose a destination folder";
+"panel.extractTo.prompt" = "Extract Here";
+
+/* ===== System panel: compress (pick sources + save location) ===== */
+"panel.compress.select.message" = "Choose files or folders to compress";
+"panel.compress.select.prompt" = "Next";
+"panel.compress.save.message" = "Choose where to save the ZIP";
+"panel.compress.save.prompt" = "Compress";
+"panel.compress.defaultName" = "Archive.zip";

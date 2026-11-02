@@ -84,8 +84,8 @@ final class AppModel: ObservableObject {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.message = "选择要打开的归档文件"
-        panel.prompt = "打开"
+        panel.message = NSLocalizedString("panel.openArchive.message", comment: "打开归档面板的提示语")
+        panel.prompt = NSLocalizedString("panel.openArchive.prompt", comment: "打开归档面板的确认按钮")
         panel.allowedContentTypes = Self.archiveTypes
         guard panel.runModal() == .OK, let url = panel.url else { return }
         load(archive: url)
@@ -160,8 +160,8 @@ final class AppModel: ObservableObject {
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.message = "选择解压目标文件夹"
-        panel.prompt = "解压到此处"
+        panel.message = NSLocalizedString("panel.extractTo.message", comment: "选择解压目标文件夹的提示语")
+        panel.prompt = NSLocalizedString("panel.extractTo.prompt", comment: "解压目标面板的确认按钮")
         panel.directoryURL = archive.deletingLastPathComponent()
         guard panel.runModal() == .OK, let dest = panel.url else { return }
 
@@ -246,15 +246,15 @@ final class AppModel: ObservableObject {
         open.canChooseFiles = true
         open.canChooseDirectories = true
         open.allowsMultipleSelection = true
-        open.message = "选择要压缩的文件或文件夹"
-        open.prompt = "下一步"
+        open.message = NSLocalizedString("panel.compress.select.message", comment: "选择待压缩内容的提示语")
+        open.prompt = NSLocalizedString("panel.compress.select.prompt", comment: "选择待压缩内容面板的确认按钮")
         guard open.runModal() == .OK, !open.urls.isEmpty else { return }
         let sources = open.urls
 
         let save = NSSavePanel()
-        save.nameFieldStringValue = "归档.zip"
-        save.message = "选择 ZIP 保存位置"
-        save.prompt = "压缩"
+        save.nameFieldStringValue = NSLocalizedString("panel.compress.defaultName", comment: "压缩保存面板的默认文件名")
+        save.message = NSLocalizedString("panel.compress.save.message", comment: "压缩保存面板的提示语")
+        save.prompt = NSLocalizedString("panel.compress.save.prompt", comment: "压缩保存面板的确认按钮")
         save.canCreateDirectories = true
         guard save.runModal() == .OK, let dest = save.url else { return }
 
