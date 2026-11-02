@@ -1,6 +1,12 @@
 import Cocoa
 import FinderSync
 
+/// 与主 App 相同的本地化约定：中文字面量直接作 key，缺失译文时回落到中文。
+/// 扩展是独立 bundle，用的是自己 `Resources/<lang>.lproj/Localizable.strings`。
+private func L(_ text: String) -> String {
+    NSLocalizedString(text, comment: "")
+}
+
 /// Finder 右键扩展。
 /// 产品约定：右键只出现一项——
 ///   · 选中的全是归档 → 「用千梭解压」
@@ -64,8 +70,8 @@ class FinderSync: FIFinderSync {
 
     // MARK: - Toolbar
 
-    override var toolbarItemName: String { "千梭" }
-    override var toolbarItemToolTip: String { "用千梭解压或压缩" }
+    override var toolbarItemName: String { L("千梭") }
+    override var toolbarItemToolTip: String { L("用千梭解压或压缩") }
     override var toolbarItemImage: NSImage {
         NSImage(named: NSImage.folderName) ?? NSImage()
     }
@@ -88,11 +94,15 @@ class FinderSync: FIFinderSync {
         let title: String
         if archives.count == selected.count {
             pending = .extract(archives)
-            title = archives.count > 1 ? "用千梭解压 \(archives.count) 个归档" : "用千梭解压"
+            title = archives.count > 1
+                ? String(format: L("用千梭解压 %d 个归档"), archives.count)
+                : L("用千梭解压")
         } else {
             // 普通文件、文件夹、以及混合选择都走压缩：任何内容都能打包。
             pending = .compress(selected)
-            title = selected.count > 1 ? "用千梭压缩 \(selected.count) 项" : "用千梭压缩"
+            title = selected.count > 1
+                ? String(format: L("用千梭压缩 %d 项"), selected.count)
+                : L("用千梭压缩")
         }
 
         let item = NSMenuItem(title: title, action: #selector(performPendingAction(_:)), keyEquivalent: "")

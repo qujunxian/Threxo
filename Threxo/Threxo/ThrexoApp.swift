@@ -41,7 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Button("解压") { model.extractAll() }
                     .keyboardShortcut("e")
                     .disabled(model.isBusy || model.entries.isEmpty || model.hasSelection)
-                Button("解压所选 \(model.selection.count) 项") { model.extractSelected() }
+                Button(String(format: L("解压所选 %d 项"), model.selection.count)) { model.extractSelected() }
                     .keyboardShortcut("e")
                     .disabled(model.isBusy || !model.hasSelection)
                 Button("解压到…") { model.extractAllChoosingDestination() }

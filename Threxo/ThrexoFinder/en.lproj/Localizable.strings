@@ -1,0 +1,12 @@
+/* ============================================================
+   千梭 Threxo Finder extension — English
+   Key = 中文原文，缺失条目回落到中文。
+   占位符顺序必须与 key 一致：%@ 字符串，%d 整数。
+   ============================================================ */
+
+"千梭" = "Threxo";
+"用千梭解压或压缩" = "Extract or compress with Threxo";
+"用千梭解压" = "Extract with Threxo";
+"用千梭解压 %d 个归档" = "Extract %d Archives with Threxo";
+"用千梭压缩" = "Compress with Threxo";
+"用千梭压缩 %d 项" = "Compress %d Items with Threxo";

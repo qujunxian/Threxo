@@ -4,6 +4,16 @@ import Combine
 import FinderSync
 import UniformTypeIdentifiers
 
+/// 界面文案本地化入口（App 与界面层共用）。
+///
+/// 约定：**中文字面量直接作为 key**，`zh-Hans.lproj/Localizable.strings` 不需要条目，
+/// 缺失译文时自动回落到中文原文，因此中文界面永远正确；只需在
+/// `en.lproj/Localizable.strings` 里补英文即可。
+/// 带参数时用 `String(format: L("… %@ …"), arg)`，key 与译文保持相同的占位符顺序。
+func L(_ text: String) -> String {
+    NSLocalizedString(text, comment: "")
+}
+
 /// UI-facing state and orchestration for the MVP flow:
 /// open archive -> browse tree -> extract (all / selection) -> create zip.
 /// Also handles `threxo://extract|compress` URL-scheme invocations from FinderSync
@@ -21,7 +31,7 @@ final class AppModel: ObservableObject {
 
     @Published var isBusy = false
     @Published var progress: Int = 0
-    @Published var statusText = "就绪"
+    @Published var statusText = L("就绪")
     @Published var errorMessage: String?
     /// 当前正在处理的文件（来自 7zz -bb1 的进度行）。
     @Published var currentItem: String?
@@ -100,7 +110,7 @@ final class AppModel: ObservableObject {
         entries = []
         treeNodes = []
         selection = []
-        statusText = "正在读取归档…"
+        statusText = L("正在读取归档…")
 
         let runner = self.runner
         Task.detached(priority: .userInitiated) {
@@ -120,10 +130,10 @@ final class AppModel: ObservableObject {
                     self.entries = parsed
                     self.treeNodes = tree
                     let files = parsed.reduce(0) { $0 + ($1.isDirectory ? 0 : 1) }
-                    self.statusText = "已加载 \(url.lastPathComponent) · \(files) 个文件"
+                    self.statusText = String(format: L("已加载 %@ · %d 个文件"), url.lastPathComponent, files)
                 } else {
-                    self.errorMessage = "读取归档失败：\(Self.describe(exitCode: code))"
-                    self.statusText = "读取失败"
+                    self.errorMessage = String(format: L("读取归档失败：%@"), Self.describe(exitCode: code))
+                    self.statusText = L("读取失败")
                     if !err.isEmpty { self.currentItem = nil }
                 }
             }
@@ -148,7 +158,7 @@ final class AppModel: ObservableObject {
     func extractAll() {
         guard !isBusy, let archive = archiveURL else { return }
         let dest = uniqueExtractDestination(for: archive)
-        extract(archive: archive, to: dest, items: [], status: "正在解压…", reveal: true)
+        extract(archive: archive, to: dest, items: [], status: L("正在解压…"), reveal: true)
     }
 
     /// 手动选择解压位置。
@@ -165,7 +175,7 @@ final class AppModel: ObservableObject {
         panel.directoryURL = archive.deletingLastPathComponent()
         guard panel.runModal() == .OK, let dest = panel.url else { return }
 
-        extract(archive: archive, to: dest, items: [], status: "正在解压…", reveal: true)
+        extract(archive: archive, to: dest, items: [], status: L("正在解压…"), reveal: true)
     }
 
     /// 只解压选中的条目（选中的文件夹会自动展开为其中的文件）。
@@ -178,7 +188,7 @@ final class AppModel: ObservableObject {
             archive: archive,
             to: dest,
             items: items,
-            status: "正在解压所选的 \(items.count) 个文件…",
+            status: String(format: L("正在解压所选的 %d 个文件…"), items.count),
             reveal: true
         )
     }
@@ -192,12 +202,12 @@ final class AppModel: ObservableObject {
             if code == 0 {
                 self.progress = 100  // 7zz 不保证打到 100%，成功后补齐。
                 self.currentItem = nil
-                self.statusText = "解压完成 → \(dest.path)"
+                self.statusText = String(format: L("解压完成 → %@"), dest.path)
                 if reveal {
                     NSWorkspace.shared.activateFileViewerSelecting([dest])
                 }
             } else {
-                self.statusText = code == 255 ? "已取消" : "解压失败"
+                self.statusText = code == 255 ? L("已取消") : L("解压失败")
                 if code != 255 {
                     self.errorMessage = Self.describe(exitCode: code)
                 }
@@ -209,13 +219,13 @@ final class AppModel: ObservableObject {
     func extractAutomatically(_ urls: [URL]) {
         guard !isBusy, !urls.isEmpty else { return }
         let archives = urls
-        runTask(status: "正在解压…") { [self] in
+        runTask(status: L("正在解压…")) { [self] in
             var lastCode: Int32 = 0
             for (index, archive) in archives.enumerated() {
                 await MainActor.run {
                     self.statusText = archives.count > 1
-                        ? "正在解压 (\(index + 1)/\(archives.count))…"
-                        : "正在解压…"
+                        ? String(format: L("正在解压 (%d/%d)…"), index + 1, archives.count)
+                        : L("正在解压…")
                 }
                 let dest = uniqueExtractDestination(for: archive)
                 try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
@@ -228,10 +238,10 @@ final class AppModel: ObservableObject {
                 self.progress = 100
                 self.currentItem = nil
                 self.statusText = archives.count > 1
-                    ? "已完成 \(archives.count) 个归档的解压"
-                    : "解压完成"
+                    ? String(format: L("已完成 %d 个归档的解压"), archives.count)
+                    : L("解压完成")
             } else {
-                self.statusText = code == 255 ? "已取消" : "解压失败"
+                self.statusText = code == 255 ? L("已取消") : L("解压失败")
                 if code != 255 { self.errorMessage = Self.describe(exitCode: code) }
             }
         }
@@ -267,7 +277,7 @@ final class AppModel: ObservableObject {
         guard !isBusy, !urls.isEmpty else { return }
         let dir = urls[0].deletingLastPathComponent()
         let stem = urls[0].deletingPathExtension().lastPathComponent
-        let base = stem.isEmpty ? "Archive" : stem
+        let base = stem.isEmpty ? L("归档") : stem
 
         var dest = dir.appendingPathComponent("\(base).zip")
         var counter = 2
@@ -282,16 +292,16 @@ final class AppModel: ObservableObject {
         if FileManager.default.fileExists(atPath: dest.path) {
             try? FileManager.default.removeItem(at: dest)
         }
-        runTask(status: "正在压缩…") { [self] in
+        runTask(status: L("正在压缩…")) { [self] in
             await compressBlocking(sources: sources, to: dest)
         } completion: { code in
             if code == 0 {
                 self.progress = 100  // 7zz 不保证打到 100%，成功后补齐。
                 self.currentItem = nil
-                self.statusText = "压缩完成 → \(dest.path)"
+                self.statusText = String(format: L("压缩完成 → %@"), dest.path)
                 self.load(archive: dest)
             } else {
-                self.statusText = code == 255 ? "已取消" : "压缩失败"
+                self.statusText = code == 255 ? L("已取消") : L("压缩失败")
                 if code != 255 { self.errorMessage = Self.describe(exitCode: code) }
             }
         }
@@ -428,7 +438,7 @@ final class AppModel: ObservableObject {
     static func archiveStem(_ url: URL) -> String {
         var name = url.deletingPathExtension().lastPathComponent
         if name.lowercased().hasSuffix(".tar") { name = String(name.dropLast(4)) }
-        return name.isEmpty ? "解压结果" : name
+        return name.isEmpty ? L("解压结果") : name
     }
 
     /// 把选中项展开成具体文件路径：选了文件夹就带上里面的所有条目，
@@ -466,13 +476,13 @@ final class AppModel: ObservableObject {
     /// 把 7-Zip 的退出码翻译成人话，替代裸露的 "退出码 2"。
     static func describe(exitCode: Int32) -> String {
         switch exitCode {
-        case 0: return "完成"
-        case 1: return "完成，但有部分文件被跳过（可能被占用、无权限或路径过长）"
-        case 2: return "归档损坏、密码错误，或目标磁盘写入失败"
-        case 7: return "命令参数错误"
-        case 8: return "内存不足，请关闭其他应用后重试"
-        case 255: return "已取消"
-        default: return "未知错误（7-Zip 退出码 \(exitCode)）"
+        case 0: return L("完成")
+        case 1: return L("完成，但有部分文件被跳过（可能被占用、无权限或路径过长）")
+        case 2: return L("归档损坏、密码错误，或目标磁盘写入失败")
+        case 7: return L("命令参数错误")
+        case 8: return L("内存不足，请关闭其他应用后重试")
+        case 255: return L("已取消")
+        default: return String(format: L("未知错误（7-Zip 退出码 %d）"), exitCode)
         }
     }
 

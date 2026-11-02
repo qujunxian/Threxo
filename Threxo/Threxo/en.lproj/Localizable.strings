@@ -1,14 +1,83 @@
-/* ===== System panel: open archive ===== */
+/* ============================================================
+   千梭 Threxo — English strings
+   Key = 中文原文（见 AppModel.swift 里 L(...) 的注释约定）
+   缺失条目会自动回落到中文，因此只需在此维护英文。
+   占位符顺序必须与 key 完全一致：%@ 字符串，%d 整数。
+   ============================================================ */
+
+/* ===== 应用名 / 品牌 ===== */
+"千梭" = "Threxo";
+
+/* ===== 系统面板：打开归档 ===== */
 "panel.openArchive.message" = "Choose an archive to open";
 "panel.openArchive.prompt" = "Open";
 
-/* ===== System panel: extract to… ===== */
+/* ===== 系统面板：解压到… ===== */
 "panel.extractTo.message" = "Choose a destination folder";
 "panel.extractTo.prompt" = "Extract Here";
 
-/* ===== System panel: compress (pick sources + save location) ===== */
+/* ===== 系统面板：压缩（选择源 + 保存位置）===== */
 "panel.compress.select.message" = "Choose files or folders to compress";
 "panel.compress.select.prompt" = "Next";
 "panel.compress.save.message" = "Choose where to save the ZIP";
 "panel.compress.save.prompt" = "Compress";
 "panel.compress.defaultName" = "Archive.zip";
+
+/* ===== 主界面：标题与副标题 ===== */
+"就绪" = "Ready";
+"%d 个文件 · 解压后 %@ · %@" = "%d files · %@ uncompressed · %@";
+"拖入压缩包即可查看内容 · 拖入文件或文件夹即可压缩" = "Drop an archive to browse it, or drop files and folders to compress";
+
+/* ===== 主界面：空状态 ===== */
+"把压缩包拖到这里" = "Drop an archive here";
+"也可以直接拖入文件或文件夹，立即打包成 ZIP" = "You can also drop files or folders to zip them right away";
+
+/* ===== 主界面：访达扩展提示条 ===== */
+"访达右键菜单尚未启用" = "Finder context menu is off";
+"到「系统设置 → 通用 → 登录项与扩展」，在访达扩展里打开「千梭」，右键压缩包即可一键解压。" = "Open System Settings → General → Login Items & Extensions, turn on Threxo under Finder extensions, then right-click any archive to extract it.";
+"刷新" = "Refresh";
+"前往设置" = "Open Settings";
+
+/* ===== 按钮与菜单 ===== */
+"打开归档…" = "Open Archive…";
+"压缩…" = "Compress…";
+"解压" = "Extract";
+"解压到…" = "Extract To…";
+"解压所选 %d 项" = "Extract %d Items";
+"取消" = "Cancel";
+
+/* ===== 进度与状态 ===== */
+"正在读取归档…" = "Reading archive…";
+"已加载 %@ · %d 个文件" = "Loaded %@ · %d files";
+"读取失败" = "Couldn't Read";
+"读取归档失败：%@" = "Couldn't read the archive: %@";
+"正在解压…" = "Extracting…";
+"正在解压所选的 %d 个文件…" = "Extracting %d selected files…";
+"正在解压 (%d/%d)…" = "Extracting (%d of %d)…";
+"解压完成" = "Extraction Complete";
+"解压完成 → %@" = "Extraction complete → %@";
+"已完成 %d 个归档的解压" = "Extracted %d archives";
+"解压失败" = "Extraction Failed";
+"正在压缩…" = "Compressing…";
+"压缩完成 → %@" = "Compression complete → %@";
+"压缩失败" = "Compression Failed";
+"已取消" = "Canceled";
+
+/* ===== 7-Zip 退出码说明 ===== */
+"完成" = "Done";
+"完成，但有部分文件被跳过（可能被占用、无权限或路径过长）" = "Done, but some files were skipped (in use, permission denied, or path too long)";
+"归档损坏、密码错误，或目标磁盘写入失败" = "The archive is damaged, the password is wrong, or writing to the destination disk failed";
+"命令参数错误" = "Invalid command arguments";
+"内存不足，请关闭其他应用后重试" = "Out of memory. Close some apps and try again";
+"未知错误（7-Zip 退出码 %d）" = "Unknown error (7-Zip exit code %d)";
+
+/* ===== 生成的文件与文件夹名 ===== */
+"解压结果" = "Extracted";
+"归档" = "Archive";
+
+/* ===== 访达右键菜单（扩展 bundle）===== */
+"用千梭解压或压缩" = "Extract or compress with Threxo";
+"用千梭解压" = "Extract with Threxo";
+"用千梭解压 %d 个归档" = "Extract %d Archives with Threxo";
+"用千梭压缩" = "Compress with Threxo";
+"用千梭压缩 %d 项" = "Compress %d Items with Threxo";

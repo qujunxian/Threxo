@@ -1,0 +1,3 @@
+/* Finder extension display name in System Settings */
+"CFBundleDisplayName" = "Threxo";
+"CFBundleName" = "Threxo";

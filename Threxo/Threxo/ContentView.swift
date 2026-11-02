@@ -49,7 +49,7 @@ struct ContentView: View {
                 .font(.system(size: 28))
                 .foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 2) {
-                Text(model.archiveURL?.lastPathComponent ?? "千梭")
+                Text(model.archiveURL?.lastPathComponent ?? L("千梭"))
                     .font(.title3.bold())
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -71,9 +71,14 @@ struct ContentView: View {
 
     private var subtitle: String {
         guard let url = model.archiveURL else {
-            return "拖入压缩包即可查看内容 · 拖入文件或文件夹即可压缩"
+            return L("拖入压缩包即可查看内容 · 拖入文件或文件夹即可压缩")
         }
-        return "\(model.fileCount) 个文件 · 解压后 \(ByteFormatter.string(model.totalUncompressedSize)) · \(url.deletingLastPathComponent().path)"
+        return String(
+            format: L("%d 个文件 · 解压后 %@ · %@"),
+            model.fileCount,
+            ByteFormatter.string(model.totalUncompressedSize),
+            url.deletingLastPathComponent().path
+        )
     }
 
     // MARK: - Finder extension banner
@@ -182,10 +187,10 @@ struct ContentView: View {
             if model.isBusy {
                 ProgressView(value: Double(model.progress), total: 100) {
                     HStack(spacing: 6) {
-                        Text("\(model.statusText) \(model.progress)%")
+                        Text(verbatim: "\(model.statusText) \(model.progress)%")
                             .font(.caption)
                         if let item = model.currentItem {
-                            Text("· \(item)")
+                            Text(verbatim: "· \(item)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -205,7 +210,7 @@ struct ContentView: View {
                     Button("解压到…") { model.extractAllChoosingDestination() }
                         .disabled(model.selection.isEmpty == false ? false : model.entries.isEmpty)
                     if model.hasSelection {
-                        Button("解压所选 \(model.selection.count) 项") { model.extractSelected() }
+                        Button(String(format: L("解压所选 %d 项"), model.selection.count)) { model.extractSelected() }
                             .buttonStyle(.borderedProminent)
                     } else {
                         Button("解压") { model.extractAll() }

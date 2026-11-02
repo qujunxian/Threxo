@@ -20,6 +20,8 @@
 		AA0000000000000000000021 /* FinderSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000022 /* FinderSync.swift */; };
 		AA0000000000000000000061 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000062 /* InfoPlist.strings */; };
 		AA0000000000000000000063 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000064 /* Localizable.strings */; };
+		AA0000000000000000000075 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000073 /* InfoPlist.strings */; };
+		AA0000000000000000000076 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000074 /* Localizable.strings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -66,6 +68,10 @@
 		AA0000000000000000000066 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		AA0000000000000000000067 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		AA0000000000000000000068 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		AA0000000000000000000069 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		AA0000000000000000000070 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
+		AA0000000000000000000071 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		AA0000000000000000000072 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -136,6 +142,8 @@
 				AA0000000000000000000022 /* FinderSync.swift */,
 				AA0000000000000000000029 /* Info.plist */,
 				AA0000000000000000000030 /* ThrexoFinder.entitlements */,
+				AA0000000000000000000073 /* InfoPlist.strings */,
+				AA0000000000000000000074 /* Localizable.strings */,
 			);
 			path = ThrexoFinder;
 			sourceTree = "<group>";
@@ -178,6 +186,7 @@
 			buildPhases = (
 				AA0000000000000000000046 /* Sources */,
 				AA0000000000000000000032 /* Frameworks */,
+				AA0000000000000000000077 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -236,6 +245,15 @@
 				AA0000000000000000000017 /* THIRD_PARTY_NOTICES.md in Resources */,
 				AA0000000000000000000061 /* InfoPlist.strings in Resources */,
 				AA0000000000000000000063 /* Localizable.strings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA0000000000000000000077 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA0000000000000000000075 /* InfoPlist.strings in Resources */,
+				AA0000000000000000000076 /* Localizable.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -310,6 +328,24 @@
 			children = (
 				AA0000000000000000000067 /* zh-Hans */,
 				AA0000000000000000000068 /* en */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000073 /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				AA0000000000000000000069 /* zh-Hans */,
+				AA0000000000000000000070 /* en */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000074 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				AA0000000000000000000071 /* zh-Hans */,
+				AA0000000000000000000072 /* en */,
 			);
 			name = Localizable.strings;
 			sourceTree = "<group>";
