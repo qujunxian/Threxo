@@ -116,6 +116,7 @@ final class CompressionOptions: ObservableObject {
         static let excludeMac = "threxo.compress.excludeMacResources"
         static let deleteSource = "threxo.compress.deleteSourceAfterCompress"
         static let zipAES = "threxo.compress.zipAES256"
+        static let verify = "threxo.compress.verifyAfterCompress"
     }
 
     private let defaults: UserDefaults
@@ -144,6 +145,15 @@ final class CompressionOptions: ObservableObject {
         didSet { defaults.set(zipAES256, forKey: Key.zipAES) }
     }
 
+    /// 压缩完成后追加一次 `7zz t` 完整性校验。
+    ///
+    /// 默认关闭：校验要完整读一遍归档并逐项算 CRC，等于把 IO 成本翻一倍。
+    /// 但它是唯一能拦住「写盘中途失败 / 磁盘满 / 文件被截断」这类静默损坏的手段，
+    /// 且开启后一旦校验失败就不会执行删源文件，所以给需要交付或归档的场景留了开关。
+    @Published var verifyAfterCompress: Bool {
+        didSet { defaults.set(verifyAfterCompress, forKey: Key.verify) }
+    }
+
     /// 不落盘。
     @Published var password: String = ""
     @Published var passwordRepeat: String = ""
@@ -165,6 +175,7 @@ final class CompressionOptions: ObservableObject {
         excludeMacResources = defaults.object(forKey: Key.excludeMac) as? Bool ?? true
         deleteSourceAfterCompress = defaults.object(forKey: Key.deleteSource) as? Bool ?? false
         zipAES256 = defaults.object(forKey: Key.zipAES) as? Bool ?? true
+        verifyAfterCompress = defaults.object(forKey: Key.verify) as? Bool ?? false
     }
 
     // MARK: - Derived

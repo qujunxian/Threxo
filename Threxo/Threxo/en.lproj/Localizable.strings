@@ -58,7 +58,9 @@
 "已完成 %d 个归档的解压" = "Extracted %d archives";
 "解压失败" = "Extraction Failed";
 "正在压缩…" = "Compressing…";
+"正在校验归档…" = "Verifying archive…";
 "压缩完成 → %@" = "Compression complete → %@";
+"压缩已完成，但校验未通过" = "Compression finished, but verification failed";
 "压缩失败" = "Compression Failed";
 "已取消" = "Canceled";
 
@@ -69,6 +71,8 @@
 "命令参数错误" = "Invalid command arguments";
 "内存不足，请关闭其他应用后重试" = "Out of memory. Close some apps and try again";
 "未知错误（7-Zip 退出码 %d）" = "Unknown error (7-Zip exit code %d)";
+"归档校验未通过：文件可能不完整或已损坏。源文件已保留，请重新压缩一次；若反复失败，检查目标磁盘的剩余空间与健康状态。" = "Verification failed: the archive may be incomplete or damaged. Your source files were kept — please compress again. If it keeps failing, check the destination disk's free space and health.";
+"归档校验未通过：%@" = "Verification failed: %@";
 
 /* ===== 生成的文件与文件夹名 ===== */
 "解压结果" = "Extracted";
@@ -101,6 +105,8 @@
 "两次输入的密码不一致" = "The two passwords don't match";
 "密码只保留在本次运行中，不会写入磁盘。" = "The password is kept only for this run and is never written to disk.";
 "排除 Mac 资源文件" = "Exclude macOS resource files";
+"压缩后校验归档完整性" = "Verify archive after compression";
+"完整读一遍归档并比对每个文件的校验值。大文件耗时约等于再压一遍；校验不通过时不会删除源文件。" = "Reads the whole archive back and checks every file's checksum. For large files this takes about as long as compressing again. Source files are never deleted when verification fails.";
 "压缩完成后把源文件移到废纸篓" = "Move source files to Trash after compression";
 "源文件会进废纸篓，可从废纸篓恢复。" = "Source files go to the Trash, where you can restore them.";
 "压缩完成后将把 %d 个源文件移到废纸篓" = "This will move %d source items to the Trash after compression";

@@ -13,6 +13,8 @@ struct CompressOptionsView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Toggle(L("排除 Mac 资源文件"), isOn: $options.excludeMacResources)
+                Toggle(L("压缩后校验归档完整性"), isOn: $options.verifyAfterCompress)
+                    .help(L("完整读一遍归档并比对每个文件的校验值。大文件耗时约等于再压一遍；校验不通过时不会删除源文件。"))
                 Toggle(L("压缩完成后把源文件移到废纸篓"), isOn: $options.deleteSourceAfterCompress)
                 Text(L("源文件会进废纸篓，可从废纸篓恢复。"))
                     .font(.caption2)

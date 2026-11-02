@@ -55,6 +55,11 @@ final class AppModel: ObservableObject {
     private var activeProcess: Process?
     private let runner: SevenZipRunner
 
+    /// 压缩已完成但自检未通过时，这里存失败原因。
+    /// 用它区分「压缩本身失败」和「文件写出来了但校验不过」——两者的
+    /// 后续动作完全不同：后者绝不能删源文件，也不能把包当成可用产物。
+    private var verifyFailure: String?
+
     struct PasswordPrompt: Identifiable {
         let id = UUID()
         let title: String
@@ -351,9 +356,38 @@ final class AppModel: ObservableObject {
         if FileManager.default.fileExists(atPath: dest.path) {
             try? FileManager.default.removeItem(at: dest)
         }
+
+        let verify = options.verifyAfterCompress
+        verifyFailure = nil
+        // 开了自检就把压缩阶段收在 0-90，最后 10 留给校验，
+        // 否则进度条已经冲到 100 还在跑，看起来像卡住了。
+        let compressCap = verify ? 90 : 100
+
         runTask(status: L("正在压缩…")) { [self] in
-            await compressBlocking(sources: sources, to: dest)
+            let code = await compressBlocking(sources: sources, to: dest, progressCap: compressCap)
+            guard code == 0, verify else { return code }
+
+            self.statusText = L("正在校验归档…")
+            self.currentItem = nil
+            let verifyCode = await verifyArchive(dest)
+            // 255 是用户自己点了取消，不算校验失败，也不该报错。
+            if verifyCode != 0, verifyCode != 255 {
+                self.verifyFailure = Self.describeVerifyFailure(code: verifyCode)
+            }
+            return verifyCode == 0 ? 0 : code
         } completion: { code in
+            // 先处理「压缩成功但校验不过」：产物不可信，此时绝不能删源文件，
+            // 也不该像成功那样把包加载出来给用户看。
+            if let failure = self.verifyFailure {
+                self.verifyFailure = nil
+                self.progress = 100
+                self.currentItem = nil
+                self.statusText = L("压缩已完成，但校验未通过")
+                self.errorMessage = failure
+                self.options.resetPassword()
+                return
+            }
+
             if code == 0 {
                 self.progress = 100  // 7zz 不保证打到 100%，成功后补齐。
                 self.currentItem = nil
@@ -495,12 +529,22 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func compressBlocking(sources: [URL], to dest: URL) async -> Int32 {
+    private func compressBlocking(sources: [URL], to dest: URL, progressCap: Int) async -> Int32 {
         // gzip / bzip2 / xz 一次只能压一个文件流，目录或多项必须先打 tar。
         if options.format.isSingleStream, sources.count > 1 || sources.contains(where: Self.isDirectory) {
-            return await compressViaTar(sources: sources, to: dest)
+            return await compressViaTar(sources: sources, to: dest, progressCap: progressCap)
         }
-        return await runCompress(sources: sources, to: dest, progressRange: 0...100)
+        return await runCompress(sources: sources, to: dest, progressRange: 0...progressCap)
+    }
+
+    /// 压缩后自检。`7zz t` 只读归档、逐项比对 CRC，不落盘。
+    ///
+    /// 必须带密码：加密包里这条命令拿不到密码就会报
+    /// `Data Error in encrypted file. Wrong password?`，看起来跟文件损坏一样，
+    /// 极易误判成压缩出了问题。
+    private func verifyArchive(_ archive: URL) async -> Int32 {
+        let args = ["t", archive.path, "-p\(options.password)", "-bsp1", "-bb1"]
+        return await runWithProgress(args, progressRange: 90...100)
     }
 
     private func runCompress(sources: [URL], to dest: URL, progressRange: ClosedRange<Int>) async -> Int32 {
@@ -514,7 +558,7 @@ final class AppModel: ObservableObject {
     /// 两步走：先打 tar，再用 gzip/bzip2/xz 压。
     /// 产物是标准的 `.tar.gz` / `.tar.bz2` / `.tar.xz`，解压时由
     /// `expandIntermediateTar` 还原成内容。
-    private func compressViaTar(sources: [URL], to dest: URL) async -> Int32 {
+    private func compressViaTar(sources: [URL], to dest: URL, progressCap: Int) async -> Int32 {
         let tmpDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("Threxo-\(UUID().uuidString)", isDirectory: true)
         do {
@@ -533,7 +577,8 @@ final class AppModel: ObservableObject {
         tarArgs.append(contentsOf: ["-bso0", "-bsp0"])
         tarArgs.append(contentsOf: sources.map(\.path))
 
-        let tarCode = await runWithProgress(tarArgs, progressRange: 0...50)
+        let mid = progressCap / 2
+        let tarCode = await runWithProgress(tarArgs, progressRange: 0...mid)
         guard tarCode == 0 else { return tarCode }
 
         var args = ["a", dest.path, options.format.typeFlag]
@@ -541,7 +586,7 @@ final class AppModel: ObservableObject {
             args.append("-mx=\(options.level.mx)")
         }
         args.append(contentsOf: ["-bsp1", "-bb1", tarURL.path])
-        return await runWithProgress(args, progressRange: 50...100)
+        return await runWithProgress(args, progressRange: mid...progressCap)
     }
 
     /// 跑一次 7zz 并把百分比映射到 `progressRange` 区间（两步流程用）。
@@ -748,6 +793,16 @@ final class AppModel: ObservableObject {
         case 255: return L("已取消")
         default: return String(format: L("未知错误（7-Zip 退出码 %d）"), exitCode)
         }
+    }
+
+    /// 自检失败的提示。这里要给的是「下一步做什么」，不是退出码。
+    /// 退出码 2 覆盖了读不全、CRC 不符、磁盘写入失败三种情况，统一按
+    /// 「产物不可信」处理：保住源文件，重压一次。
+    static func describeVerifyFailure(code: Int32) -> String {
+        if code == 2 {
+            return L("归档校验未通过：文件可能不完整或已损坏。源文件已保留，请重新压缩一次；若反复失败，检查目标磁盘的剩余空间与健康状态。")
+        }
+        return String(format: L("归档校验未通过：%@"), describe(exitCode: code))
     }
 
     // MARK: - Types
