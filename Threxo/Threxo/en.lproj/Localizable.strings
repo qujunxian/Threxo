@@ -109,7 +109,6 @@
 "压缩完成 → %@（%d 个源文件已移到废纸篓）" = "Compression complete → %@ (%d source items moved to Trash)";
 "移到废纸篓失败：%@" = "Couldn't move to the Trash: %@";
 "解压支持：%@" = "Extracts: %@";
-"可创建的格式取决于内置 7-Zip，未列出的格式不支持压缩。" = "Creatable formats depend on the bundled 7-Zip. Formats not listed cannot be created.";
 
 /* ===== 密码提示 ===== */
 "需要密码" = "Password Required";

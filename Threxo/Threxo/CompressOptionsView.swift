@@ -21,16 +21,10 @@ struct CompressOptionsView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(String(format: L("解压支持：%@"), CompressionOptions.extractableHint))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(L("可创建的格式取决于内置 7-Zip，未列出的格式不支持压缩。"))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text(String(format: L("解压支持：%@"), CompressionOptions.extractableHint))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
         .frame(width: 330)
