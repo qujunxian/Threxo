@@ -6,11 +6,11 @@ Threxo bundles the following third-party software. Each project remains subject 
 
 - Project: https://www.7-zip.org/
 - License: GNU LGPL (main), GNU LGPL with unRAR restriction (some code), BSD 3-clause, BSD 2-clause.
-- Full text: `7zip-License.txt` (bundled alongside this file).
-- Usage: Threxo invokes `7zz` as a **separate executable** and does not modify it.
+- Full text: `7zip-License.txt`, shipped next to this file and also readable inside the app.
+- Usage: Threxo runs `7zz` as a separate executable and does not modify it.
 - RAR: extraction only. Threxo never creates RAR archives.
 
 ## Notes
 
 - If ZIPFoundation, Sparkle, or other libraries are added later, append their license and copyright text here before release.
-- This file must remain inside `Threxo.app/Contents/Resources/` for license compliance.
+- This file has to stay in `Threxo.app/Contents/Resources/` for license compliance.
