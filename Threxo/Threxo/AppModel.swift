@@ -67,6 +67,20 @@ final class AppModel: ObservableObject {
     /// 所以密码框、失败提示、完成后的跳转都必须走独立弹窗。
     private var silentRun = false
 
+    /// 内置 7-Zip 不可用时的说明。非 nil 表示这台机器上没法处理压缩包，
+    /// 界面据此显示提示并禁用操作——比 `fatalError` 直接闪退好交代。
+    @Published private(set) var startupError: String?
+
+    /// 解压时发现的非致命路径异常（`../` 被落平），成功后拼进结果提示。
+    private var pendingSafetyNote: String?
+
+    /// 安全检查拦下解压时的详细说明。写成属性是因为静默链路的通知
+    /// 由任务收尾统一发一次，中途再发一条就成了重复打扰。
+    private var pendingSafetyFailure: String?
+
+    /// 自定义退出码：路径安全检查未通过。
+    static let exitUnsafePath: Int32 = 254
+
     struct PasswordPrompt: Identifiable {
         let id = UUID()
         let title: String
@@ -74,10 +88,13 @@ final class AppModel: ObservableObject {
     }
 
     init() {
-        guard let url = Bundle.main.url(forResource: "7zz", withExtension: nil) else {
-            fatalError("7zz not bundled")
+        // 缺资源时不崩：指向一个必然不存在的路径，让 `Process.run()` 抛错走正常失败分支。
+        let bundled = Bundle.main.url(forResource: "7zz", withExtension: nil)
+        runner = SevenZipRunner(executableURL: bundled ?? URL(fileURLWithPath: "/nonexistent/7zz"))
+        if bundled == nil || !FileManager.default.isExecutableFile(atPath: bundled!.path) {
+            startupError = L("应用内缺少 7-Zip 程序（Resources/7zz），无法处理压缩包。请重新下载安装包。")
+            appDbg("7zz missing")
         }
-        runner = SevenZipRunner(executableURL: url)
         refreshFinderExtensionState()
         ArchiveExport.cleanupStale()
     }
@@ -329,7 +346,12 @@ final class AppModel: ObservableObject {
             if code == 0 {
                 self.progress = 100  // 7zz 不保证打到 100%，成功后补齐。
                 self.currentItem = nil
-                self.statusText = String(format: L("解压完成 → %@"), dest.path)
+                var text = String(format: L("解压完成 → %@"), dest.path)
+                if let note = self.pendingSafetyNote {
+                    text += "（\(note)）"
+                    self.pendingSafetyNote = nil
+                }
+                self.statusText = text
                 if reveal {
                     NSWorkspace.shared.activateFileViewerSelecting([dest])
                 }
@@ -369,7 +391,8 @@ final class AppModel: ObservableObject {
                     archive: archive,
                     to: dest,
                     items: [],
-                    renameExisting: true
+                    renameExisting: true,
+                    silent: silent
                 )
                 if lastCode != 0 { break }
             }
@@ -385,11 +408,16 @@ final class AppModel: ObservableObject {
                     ? String(format: L("已解压 %d 个归档到当前文件夹"), archives.count)
                     : L("解压完成，文件已放到当前文件夹")
                 if silent {
+                    var body = String(format: L("已解压到「%@」"), folder.lastPathComponent)
+                    if let note = self.pendingSafetyNote {
+                        body += "\n" + note
+                        self.pendingSafetyNote = nil
+                    }
                     Notifier.shared.success(
                         title: archives.count > 1
                             ? String(format: L("已解压 %d 个归档"), archives.count)
                             : L("解压完成"),
-                        body: String(format: L("已解压到「%@」"), folder.lastPathComponent),
+                        body: body,
                         reveal: folder
                     )
                 }
@@ -397,10 +425,16 @@ final class AppModel: ObservableObject {
                 self.statusText = code == 255 ? L("已取消") : L("解压失败")
                 guard code != 255 else { return }
                 let detail = Self.describe(exitCode: code)
+                let safety = self.pendingSafetyFailure
+                self.pendingSafetyFailure = nil
                 if silent {
-                    self.reportSilentFailure(title: L("解压失败"), message: detail)
+                    self.reportSilentFailure(
+                        title: safety != nil ? L("解压已停止") : L("解压失败"),
+                        message: safety ?? detail,
+                        lines: safety != nil ? 3 : 1
+                    )
                 } else {
-                    self.errorMessage = detail
+                    self.errorMessage = safety ?? detail
                 }
             }
         }
@@ -763,13 +797,23 @@ final class AppModel: ObservableObject {
         archive: URL,
         to dest: URL,
         items: [String],
-        renameExisting: Bool = false
+        renameExisting: Bool = false,
+        silent: Bool = false
     ) async -> Int32 {
         // 已知有加密条目但还没拿到密码：先问，省掉一次必然失败的解压。
         if archiveEncrypted, archivePassword == nil {
             guard let entered = await askPassword(isRetry: false) else { return 255 }
             archivePassword = entered
         }
+
+        // 路径预检：`/etc/x` 这种条目会被 7-Zip 静默搬到 `<目标>/etc/x`，
+        // 用户只会看到凭空多出来的目录，所以先问一句再动手。
+        if let blocked = await screenEntryPaths(archive: archive, items: items, silent: silent) {
+            return blocked
+        }
+
+        // 拍个顶层快照，解压后用来算「这次多出了什么」。
+        let before = ArchiveSafety.topLevelNames(of: dest)
 
         var result = await runExtract(
             archive: archive,
@@ -796,7 +840,77 @@ final class AppModel: ObservableObject {
         if result.code == 0 {
             await expandIntermediateTar(archive: archive, destination: dest, renameExisting: renameExisting)
         }
+
+        // 复核：本次新增的顶层条目必须都落在目标目录内。
+        // 只有归档夹带符号链接、且解压器没重写链接目标时才会命中，命中就是真的写出去了。
+        let added = ArchiveSafety.topLevelNames(of: dest).subtracting(before)
+        let escaped = ArchiveSafety.escaped(in: dest, added: added)
+        if !escaped.isEmpty {
+            reportEscape(escaped, in: dest, silent: silent)
+            return Self.exitUnsafePath
+        }
+
         return result.code
+    }
+
+    /// 解压前的路径预检。
+    /// - Returns: 需要中止时返回退出码；`nil` 表示放行。
+    private func screenEntryPaths(archive: URL, items: [String], silent: Bool) async -> Int32? {
+        let listing = await runSync([
+            "l", "-slt", "-ba", "-p\(archivePassword ?? "")", archive.path,
+        ])
+        // 列不出来（头部加密、损坏、分卷缺失）就不拦，交给 7-Zip 自己报错，免得误伤。
+        guard listing.code == 0 else { return nil }
+
+        let findings = ArchiveSafety.inspect(entries: ArchiveLister.parse(listing.output), items: items)
+        guard !findings.isEmpty else { return nil }
+
+        let detail = ArchiveSafety.summarize(findings)
+        let fatal = findings.filter { $0.problem.isFatal }
+
+        guard !fatal.isEmpty else {
+            // 只有 `../`：7-Zip 会剥掉层级落平在目标里，安全，只是名字会变。
+            // 不打断，解压成功后把这件事写进提示里。
+            pendingSafetyNote = String(
+                format: L("有 %d 个条目的路径向上跳级（../），已按落平后的名字解出"),
+                findings.count
+            )
+            return nil
+        }
+
+        let title = String(
+            format: L("「%@」中有 %d 个条目路径异常"),
+            archive.lastPathComponent, findings.count
+        )
+        let consequence = L("这类条目会被解压器改写后写到目标文件夹里，目录结构可能和压缩包内看到的不一致。")
+
+        if silent {
+            // 通知由任务收尾统一发，这里只留文案，避免一次失败弹两条通知。
+            pendingSafetyFailure = detail + "\n" + consequence
+            return Self.exitUnsafePath
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = title
+        alert.informativeText = detail + "\n\n" + consequence
+        alert.addButton(withTitle: L("取消"))
+        alert.addButton(withTitle: L("仍然解压"))
+        return alert.runModal() == .alertSecondButtonReturn ? nil : Self.exitUnsafePath
+    }
+
+    /// 解压后发现内容被写到目标目录外：这个必须让人知道，不能只写日志。
+    private func reportEscape(_ paths: [String], in dest: URL, silent: Bool) {
+        let sample = paths.prefix(3).map { "· \($0)" }.joined(separator: "\n")
+        let message = String(
+            format: L("有 %d 项内容被写到了「%@」之外：\n%@\n\n源归档可能带有指向目录外的符号链接。建议检查这些位置，确认是否还需要保留。"),
+            paths.count, dest.lastPathComponent, sample
+        )
+        if silent {
+            pendingSafetyFailure = message
+        } else {
+            errorMessage = message
+        }
     }
 
     private func runExtract(
@@ -1011,15 +1125,17 @@ final class AppModel: ObservableObject {
     }
 
     /// 静默失败一律走通知，不弹任何窗口——右键链路本来就不该打断用户手上的事。
-    private func reportSilentFailure(title: String, message: String) {
-        // 7zz 的原始报错可能好几行，通知正文只留第一段，足够定位问题。
-        let brief = message
+    /// - Parameter lines: 保留的行数。7zz 的原始报错取首段就够，安全检查的
+    ///   结论需要首行加样例路径，多留两行。
+    private func reportSilentFailure(title: String, message: String, lines: Int = 1) {
+        let kept = message
             .split(separator: "\n", omittingEmptySubsequences: true)
-            .first
-            .map(String.init) ?? message
+            .prefix(max(1, lines))
+            .joined(separator: "\n")
+        let brief = kept.isEmpty ? message : kept
         Notifier.shared.failure(
             title: title,
-            body: brief.count > 180 ? String(brief.prefix(180)) + "…" : brief
+            body: brief.count > 220 ? String(brief.prefix(220)) + "…" : brief
         )
     }
 
@@ -1067,6 +1183,11 @@ final class AppModel: ObservableObject {
             #if DEBUG
             debugAdd(url)
             #endif
+        #if DEBUG
+        case "about":
+            // 仅调试：脚本里验一下关于/许可页能正常渲染，Release 不存在这个入口。
+            AboutWindowController.shared.show()
+        #endif
         default:
             break
         }
@@ -1248,6 +1369,7 @@ final class AppModel: ObservableObject {
         case 2: return L("归档损坏、密码错误，或目标磁盘写入失败")
         case 7: return L("命令参数错误")
         case 8: return L("内存不足，请关闭其他应用后重试")
+        case 254: return L("归档内的条目路径异常，已停止解压")
         case 255: return L("已取消")
         default: return String(format: L("未知错误（7-Zip 退出码 %d）"), exitCode)
         }

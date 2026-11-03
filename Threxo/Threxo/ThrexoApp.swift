@@ -43,6 +43,12 @@ func appDbg(_ message: @autoclosure () -> String) {
         // 只声明设置面板：`Settings` 启动时不建窗，正好当「零窗口」应用的壳。
         Settings { SettingsPane() }
             .commands {
+                CommandGroup(replacing: .appInfo) {
+                    Button(L("关于千梭")) {
+                        AboutWindowController.shared.show()
+                    }
+                }
+
                 CommandGroup(replacing: .newItem) {
                     Button("打开归档…") {
                         MainWindowController.shared.show()
@@ -100,6 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppDelegate.shared = self
         appDbg("willFinishLaunching")
         installURLEventHandler()
+        installOpenDocumentsHandler()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -128,6 +135,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             forEventClass: AEEventClass(kInternetEventClass),
             andEventID: AEEventID(kAEGetURL)
         )
+    }
+
+    /// 接管「用千梭打开」和双击归档。
+    ///
+    /// 只实现 `application(_:openFiles:)` 不够：App 的 Scene 里没有 WindowGroup，
+    /// SwiftUI 的 delegate adaptor 不会把 odoc 事件转下来（实测连方法都不进），
+    /// 表现就是双击归档毫无反应。这里跟 URL 事件一样自己注册处理器。
+    private func installOpenDocumentsHandler() {
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleOpenDocumentsEvent(_:withReply:)),
+            forEventClass: AEEventClass(kCoreEventClass),
+            andEventID: AEEventID(kAEOpenDocuments)
+        )
+    }
+
+    @objc private func handleOpenDocumentsEvent(
+        _ event: NSAppleEventDescriptor,
+        withReply reply: NSAppleEventDescriptor
+    ) {
+        guard let list = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject)) else { return }
+
+        var urls: [URL] = []
+        let count = list.numberOfItems
+        if count > 0 {
+            for index in 1...count {
+                if let url = Self.url(from: list.atIndex(index)) {
+                    urls.append(url)
+                }
+            }
+        } else if let url = Self.url(from: list) {
+            urls.append(url)
+        }
+        appDbg("openDocuments count=\(urls.count)")
+
+        guard !urls.isEmpty else { return }
+
+        jobStarted = true
+        MainWindowController.shared.retractIfEmpty()
+        showMainWindow()
+        DispatchQueue.main.async {
+            AppModel.shared.receiveOpenFiles(urls)
+        }
+    }
+
+    /// odoc 里的文件描述符给的是 `file:///…` 形式的 URL 字符串，不是 POSIX 路径。
+    /// 直接当成路径会拼出 `/file:///…` 这种不存在的名字（实测读到 errno=2）。
+    private static func url(from descriptor: NSAppleEventDescriptor?) -> URL? {
+        guard let value = descriptor?.stringValue, !value.isEmpty else { return nil }
+        if value.lowercased().hasPrefix("file:"), let url = URL(string: value), url.isFileURL {
+            return url
+        }
+        return URL(fileURLWithPath: value)
     }
 
     private func showMainWindow() {
@@ -203,6 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) { [weak self] in
             guard let self, self.headlessJobs == 0 else { return }
             guard !MainWindowController.shared.isVisible else { return }
+            guard !AboutWindowController.shared.isVisible else { return }
             guard !MainWindowController.shared.hasShown else { return }
             appDbg("terminate after headless job")
             NSApp.terminate(nil)
@@ -391,9 +452,24 @@ private struct SettingsPane: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L("关于与许可"))
+                    .font(.callout.weight(.semibold))
+                HStack(spacing: 10) {
+                    Text(L("内置 7-Zip 26.04，其 LGPL 许可要求随 App 可查阅。"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(L("查看…")) {
+                        AboutWindowController.shared.show()
+                    }
+                    .controlSize(.small)
+                }
+            }
+
             Spacer(minLength: 0)
         }
         .padding(20)
-        .frame(width: 420, height: 280, alignment: .topLeading)
+        .frame(width: 420, height: 340, alignment: .topLeading)
     }
 }

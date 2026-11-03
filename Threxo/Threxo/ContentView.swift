@@ -338,7 +338,17 @@ struct ContentView: View {
 
     @ViewBuilder
     private var statusLabel: some View {
-        if let error = model.errorMessage {
+        // 启动错误优先：压缩引擎不可用时，其他提示都没有意义。
+        if let startup = model.startupError {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.octagon.fill")
+                    .foregroundStyle(.red)
+                Text(startup)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+            }
+        } else if let error = model.errorMessage {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)

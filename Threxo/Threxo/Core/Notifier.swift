@@ -45,7 +45,7 @@ final class Notifier: NSObject, NSUserNotificationCenterDelegate {
             notification.userInfo = ["reveal": reveal]
         }
         NSUserNotificationCenter.default.deliver(notification)
-        appDbg("notifier delivered \(title)")
+        appDbg("notifier delivered \(title) | \(body)")
     }
 
     // MARK: - NSUserNotificationCenterDelegate
