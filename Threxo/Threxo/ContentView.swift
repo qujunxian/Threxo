@@ -19,6 +19,10 @@ struct ContentView: View {
                 Divider()
             }
             content
+            if model.archiveURL != nil, !model.entries.isEmpty, !model.isBusy {
+                Divider()
+                hintBar
+            }
             Divider()
             footer
         }
@@ -28,7 +32,13 @@ struct ContentView: View {
             model.refreshFinderExtensionState()
         }
         .dropDestination(for: URL.self) { urls, _ in
-            model.receiveOpenFiles(urls)
+            // 已经开着归档时，拖进来的文件是「加进这个包」；没开归档才按打开/压缩处理。
+            // 想换一个归档看，就拖到标题栏（见 header 的 dropDestination）。
+            if model.archiveURL != nil {
+                model.addDroppedFiles(urls, toFolder: nil)
+            } else {
+                model.receiveOpenFiles(urls)
+            }
             return true
         } isTargeted: { targeted in
             drop.isTargeted = targeted
@@ -123,6 +133,15 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
         }
         .padding(16)
+        .background(drop.headerTargeted ? Color.accentColor.opacity(0.10) : Color.clear)
+        .dropDestination(for: URL.self) { urls, _ in
+            // 标题栏是「换一个归档」的落点：列表区域留给「加进归档」。
+            guard let archive = urls.first(where: AppModel.isArchiveURL) else { return false }
+            model.load(archive: archive)
+            return true
+        } isTargeted: { targeted in
+            drop.headerTargeted = targeted
+        }
     }
 
     private var subtitle: String {
@@ -179,7 +198,15 @@ struct ContentView: View {
                 row(icon: node.isDirectory ? "folder" : "doc",
                     tint: node.isDirectory ? Color.accentColor : Color.secondary,
                     name: node.name,
-                    detail: node.isDirectory ? nil : ByteFormatter.string(node.size))
+                    detail: node.isDirectory ? nil : ByteFormatter.string(node.size),
+                    highlighted: drop.rowTarget == node.path)
+                    .modifier(ArchiveRowActions(
+                        model: model,
+                        drop: drop,
+                        path: node.path,
+                        name: node.name,
+                        isDirectory: node.isDirectory
+                    ))
             }
             .listStyle(.inset)
         } else {
@@ -188,13 +215,36 @@ struct ContentView: View {
                 row(icon: entry.isDirectory ? "folder" : "doc",
                     tint: entry.isDirectory ? Color.accentColor : Color.secondary,
                     name: entry.path,
-                    detail: entry.isDirectory ? nil : ByteFormatter.string(entry.size))
+                    detail: entry.isDirectory ? nil : ByteFormatter.string(entry.size),
+                    highlighted: drop.rowTarget == entry.path)
+                    .modifier(ArchiveRowActions(
+                        model: model,
+                        drop: drop,
+                        path: entry.path,
+                        name: (entry.path as NSString).lastPathComponent,
+                        isDirectory: entry.isDirectory
+                    ))
             }
             .listStyle(.inset)
         }
     }
 
-    private func row(icon: String, tint: Color, name: String, detail: String?) -> some View {
+    /// 两件事都不容易被发现，用一行灰字点出来。
+    private var hintBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "hand.draw")
+                .font(.system(size: 10))
+            Text("把条目拖到访达即解压到那里 · 把文件拖到文件夹行或列表空白处，就加进这个归档")
+                .font(.caption2)
+            Spacer()
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(Color.primary.opacity(0.03))
+    }
+
+    private func row(icon: String, tint: Color, name: String, detail: String?, highlighted: Bool = false) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .foregroundStyle(tint)
@@ -209,6 +259,11 @@ struct ContentView: View {
             }
         }
         .padding(.vertical, 2)
+        .padding(.horizontal, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(highlighted ? Color.accentColor.opacity(0.18) : Color.clear)
+        )
     }
 
     private var emptyState: some View {
@@ -263,9 +318,11 @@ struct ContentView: View {
                 if model.isBusy {
                     Button("取消") { model.cancel() }
                 } else if model.archiveURL != nil {
-                    Button("解压到…") { model.extractAllChoosingDestination() }
-                        .disabled(model.selection.isEmpty == false ? false : model.entries.isEmpty)
+                    Button("解压到…") { model.extractChoosingDestination() }
+                        .disabled(model.entries.isEmpty)
                     if model.hasSelection {
+                        Button("解压到此处") { model.extractPaths(Array(model.selection), choosingDestination: false) }
+                            .help(L("解到压缩包所在文件夹，重名自动改名，不覆盖已有文件"))
                         Button(String(format: L("解压所选 %d 项"), model.selection.count)) { model.extractSelected() }
                             .buttonStyle(.borderedProminent)
                     } else {
@@ -300,9 +357,60 @@ struct ContentView: View {
     }
 }
 
+/// 列表行上的两个动作：
+///   · 拖出去 → 落到访达时解压到那个位置（`NSItemProvider` 文件承诺）；
+///   · 把文件拖到这一行 → 加进归档的这个层级（文件夹行进它自己，文件行进它所在那层）。
+private struct ArchiveRowActions: ViewModifier {
+    let model: AppModel
+    let drop: DropState
+    let path: String
+    let name: String
+    let isDirectory: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(Rectangle())
+            .onDrag {
+                model.dragProvider(path: path, name: name, isDirectory: isDirectory)
+            }
+            .dropDestination(for: URL.self) { urls, _ in
+                model.addDroppedFiles(urls, toFolder: targetFolder)
+                return true
+            } isTargeted: { inside in
+                if inside {
+                    drop.rowTarget = path
+                } else if drop.rowTarget == path {
+                    drop.rowTarget = nil
+                }
+            }
+            .contextMenu {
+                Button("解压到…") {
+                    model.extractPaths(model.targets(for: path), choosingDestination: true)
+                }
+                Button("解压到压缩包所在文件夹") {
+                    model.extractPaths(model.targets(for: path), choosingDestination: false)
+                }
+                Divider()
+                Button("解压到同级文件夹") {
+                    model.extractPathsToNewFolder(model.targets(for: path))
+                }
+            }
+    }
+
+    private var targetFolder: String {
+        if isDirectory { return AppModel.normalizeEntryPath(path) }
+        return AppModel.normalizeEntryPath((path as NSString).deletingLastPathComponent)
+    }
+}
+
 /// 拖拽高亮状态。独立成 ObservableObject，避免在 View 里使用 @State 宏。
 final class DropState: ObservableObject {
+    /// 文件拖到窗口空白处。
     @Published var isTargeted = false
+    /// 文件正悬在哪一行的层级上（该行的 path）。
+    @Published var rowTarget: String?
+    /// 归档拖到标题栏（= 换一个打开）。
+    @Published var headerTargeted = false
 }
 
 /// 顶栏的临时状态（设置面板是否展开），同样为了绕开 @State 宏。

@@ -79,6 +79,7 @@ final class AppModel: ObservableObject {
         }
         runner = SevenZipRunner(executableURL: url)
         refreshFinderExtensionState()
+        ArchiveExport.cleanupStale()
     }
 
     // MARK: - Derived state
@@ -234,6 +235,53 @@ final class AppModel: ObservableObject {
         extract(archive: archive, to: dest, items: [], status: L("正在解压…"), reveal: true)
     }
 
+    /// 右键某一行时要处理的范围：这一行在多选里就整批处理，否则只处理这一行。
+    func targets(for path: String) -> [String] {
+        selection.contains(path) ? Array(selection) : [path]
+    }
+
+    /// 工具栏「解压到…」：有选中就只解选中的，没选中解全部。
+    func extractChoosingDestination() {
+        if hasSelection {
+            extractPaths(Array(selection), choosingDestination: true)
+        } else {
+            extractAllChoosingDestination()
+        }
+    }
+
+    /// 把指定条目解到用户挑的目录（保留包内相对路径）。
+    func extractPaths(_ paths: [String], choosingDestination: Bool) {
+        guard !isBusy, let archive = archiveURL else { return }
+        let items = expandSelection(Set(paths))
+        guard !items.isEmpty else { return }
+
+        let dest: URL
+        if choosingDestination {
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.canCreateDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.message = NSLocalizedString("panel.extractTo.message", comment: "选择解压目标文件夹的提示语")
+            panel.prompt = NSLocalizedString("panel.extractTo.prompt", comment: "解压目标面板的确认按钮")
+            panel.directoryURL = archive.deletingLastPathComponent()
+            guard panel.runModal() == .OK, let chosen = panel.url else { return }
+            dest = chosen
+        } else {
+            // 「解到压缩包所在文件夹」：直接铺在原地，重名自动改名，绝不覆盖。
+            dest = archive.deletingLastPathComponent()
+        }
+
+        extract(
+            archive: archive,
+            to: dest,
+            items: items,
+            status: String(format: L("正在解压所选的 %d 个文件…"), items.count),
+            reveal: true,
+            renameExisting: true
+        )
+    }
+
     /// 只解压选中的条目（选中的文件夹会自动展开为其中的文件）。
     func extractSelected() {
         guard !isBusy, let archive = archiveURL, !selection.isEmpty else { return }
@@ -249,11 +297,34 @@ final class AppModel: ObservableObject {
         )
     }
 
-    private func extract(archive: URL, to dest: URL, items: [String], status: String, reveal: Bool) {
+    /// 解到「压缩包同级的同名文件夹」，重名就换下一个名字——与主按钮同一套语义。
+    func extractPathsToNewFolder(_ paths: [String]) {
+        guard !isBusy, let archive = archiveURL else { return }
+        let items = expandSelection(Set(paths))
+        guard !items.isEmpty else { return }
+        let dest = uniqueExtractDestination(for: archive)
+        extract(
+            archive: archive,
+            to: dest,
+            items: items,
+            status: String(format: L("正在解压所选的 %d 个文件…"), items.count),
+            reveal: true,
+            renameExisting: true
+        )
+    }
+
+    private func extract(
+        archive: URL,
+        to dest: URL,
+        items: [String],
+        status: String,
+        reveal: Bool,
+        renameExisting: Bool = false
+    ) {
         try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
 
         runTask(status: status) { [self] in
-            await extractBlocking(archive: archive, to: dest, items: items)
+            await extractBlocking(archive: archive, to: dest, items: items, renameExisting: renameExisting)
         } completion: { code in
             if code == 0 {
                 self.progress = 100  // 7zz 不保证打到 100%，成功后补齐。
@@ -323,6 +394,183 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: - 追加文件到归档（把访达里的文件拖进来）
+
+    /// 把 `urls` 加进当前归档的 `folder` 层级（nil / 空串表示根）。
+    ///
+    /// 7-Zip 没有「放进包内某目录」的参数，条目路径就是命令行给的路径，
+    /// 所以这里先在临时目录搭一棵镜像，再用相对路径追加（见 `ArchiveEditing`）。
+    func addDroppedFiles(_ urls: [URL], toFolder folder: String?) {
+        guard !urls.isEmpty else { return }
+        guard let archive = archiveURL else {
+            // 没开归档时，拖进来的东西按原语义处理：归档就打开、其他就压缩。
+            receiveOpenFiles(urls)
+            return
+        }
+        guard !isBusy else { NSSound.beep(); return }
+        guard ArchiveEditing.canAppend(to: archive) else {
+            errorMessage = String(
+                format: L("「%@」这种格式装不下多个条目，无法直接追加文件。请先解压再重新打包。"),
+                archive.pathExtension.uppercased()
+            )
+            return
+        }
+
+        let target = Self.normalizeEntryPath(folder ?? "")
+        let existing = childNames(in: target)
+        let incoming = urls.map(\.lastPathComponent)
+        let conflicts = incoming.filter(existing.contains)
+
+        var policy = ArchiveEditing.ConflictPolicy.overwrite
+        if !conflicts.isEmpty {
+            policy = askAppendConflict(conflicts)
+            guard policy != .cancel else { return }
+        }
+
+        let staged: ArchiveEditing.Staged
+        do {
+            staged = try ArchiveEditing.stage(
+                urls,
+                folder: target,
+                policy: policy,
+                existingNames: existing
+            )
+        } catch {
+            errorMessage = String(format: L("准备要添加的文件失败：%@"), error.localizedDescription)
+            return
+        }
+        guard !staged.relativePaths.isEmpty else {
+            try? FileManager.default.removeItem(at: staged.root)
+            return
+        }
+
+        let location = target.isEmpty ? archive.lastPathComponent : target
+        appDbg("addDroppedFiles folder=\(target) staged=\(staged.relativePaths)")
+
+        runTask(status: L("正在添加文件…")) { [self] in
+            // 往加密包里追加同样要密码，而且必须在起进程前拿到，
+            // 否则 7zz 会退化成「用空密码新写一个不加密的条目」。
+            if archiveEncrypted, archivePassword == nil {
+                guard let entered = await askPassword(isRetry: false) else { return 255 }
+                archivePassword = entered
+            }
+            return await runAdd(
+                archive: archive,
+                relativePaths: staged.relativePaths,
+                staging: staged.root
+            )
+        } completion: { code in
+            try? FileManager.default.removeItem(at: staged.root)
+            appDbg("add finished code=\(code)")
+
+            if code == 0 {
+                self.progress = 100
+                self.currentItem = nil
+                self.statusText = String(
+                    format: L("已添加 %d 项 → %@"),
+                    staged.relativePaths.count,
+                    location
+                )
+                self.reloadEntries(selecting: staged.relativePaths)
+            } else {
+                self.statusText = code == 255 ? L("已取消") : L("添加失败")
+                if code != 255 { self.errorMessage = Self.describe(exitCode: code) }
+            }
+        }
+    }
+
+    /// 同名条目已经在归档里：给的是「保留两者 / 覆盖 / 取消」，默认按钮是最安全的那个。
+    private func askAppendConflict(_ names: [String]) -> ArchiveEditing.ConflictPolicy {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = names.count == 1
+            ? String(format: L("归档里已经有「%@」"), names[0])
+            : String(format: L("归档里已有 %d 个同名项目"), names.count)
+        alert.informativeText = L("覆盖会替换归档里的旧内容，且无法撤销。")
+        alert.addButton(withTitle: L("保留两者"))
+        alert.addButton(withTitle: L("覆盖"))
+        alert.addButton(withTitle: L("取消"))
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .rename
+        case .alertSecondButtonReturn: return .overwrite
+        default: return .cancel
+        }
+    }
+
+    /// 某个层级下已存在的条目名（只看直属子项，不含更深层）。
+    private func childNames(in folder: String) -> Set<String> {
+        let prefix = folder.isEmpty ? "" : folder + "/"
+        var names: Set<String> = []
+        for entry in entries {
+            let path = Self.normalizeEntryPath(entry.path)
+            guard path.count > prefix.count, path.hasPrefix(prefix) else { continue }
+            let rest = path.dropFirst(prefix.count)
+            guard !rest.contains("/") else { continue }
+            names.insert(String(rest))
+        }
+        return names
+    }
+
+    private func runAdd(archive: URL, relativePaths: [String], staging: URL) async -> Int32 {
+        var args = ["a", archive.path, "-y", "-bsp1", "-bb1"]
+        // 注意：`a` 上的空 `-p` 不等于「不加密」，而是「去问用户要密码」，
+        // 没有终端时会一直挂着。所以这儿只在真有密码时才带这个参数。
+        if let password = archivePassword, !password.isEmpty {
+            args.append("-p\(password)")
+            // 往加密的 zip 里追加：不显式指定 AES 的话，新条目会退化成 ZipCrypto，
+            // 同一个包里混两种加密方式，别的解压工具很容易打不开。
+            if archiveEncrypted, archive.pathExtension.lowercased() == "zip" {
+                args.append("-mem=AES256")
+            }
+        }
+        args.append(contentsOf: relativePaths)
+        return await runWithProgress(args, workingDirectory: staging, progressRange: 0...100)
+    }
+
+    /// 追加成功后重新读一遍归档，并把新条目选上，省得用户自己找。
+    private func reloadEntries(selecting paths: [String]) {
+        guard let archive = archiveURL else { return }
+        let password = archivePassword
+        Task { @MainActor in
+            let result = await self.list(archive, password: password)
+            guard result.code == 0 else {
+                self.errorMessage = String(format: L("读取归档失败：%@"), Self.describe(exitCode: result.code))
+                return
+            }
+            let parsed = ArchiveLister.parse(result.output)
+            self.entries = parsed
+            self.treeNodes = ArchiveTree.build(parsed)
+            let available = Set(parsed.map { Self.normalizeEntryPath($0.path) })
+            let wanted = paths.map(Self.normalizeEntryPath).filter(available.contains)
+            if !wanted.isEmpty { self.selection = Set(wanted) }
+        }
+    }
+
+    // MARK: - 拖出到访达（解压到拖到的位置）
+
+    /// 生成拖拽源：真正落到访达时才解压，拖拽预览下不发一次多余的解压。
+    /// 拖文件夹时会把整个子树一起带出去。
+    func dragProvider(path: String, name: String, isDirectory: Bool) -> NSItemProvider {
+        let normalized = Self.normalizeEntryPath(path)
+        var items = [normalized]
+        if isDirectory {
+            let prefix = normalized + "/"
+            items.append(contentsOf: entries
+                .map { Self.normalizeEntryPath($0.path) }
+                .filter { $0.hasPrefix(prefix) })
+        }
+        return ArchiveExport.provider(
+            name: name,
+            isDirectory: isDirectory,
+            archive: archiveURL,
+            items: items,
+            pathInArchive: normalized,
+            password: archivePassword,
+            executable: runner.executableURL
+        )
     }
 
     // MARK: - Compress (UI flow)
@@ -672,7 +920,13 @@ final class AppModel: ObservableObject {
     }
 
     /// 跑一次 7zz 并把百分比映射到 `progressRange` 区间（两步流程用）。
-    private func runWithProgress(_ args: [String], progressRange: ClosedRange<Int>) async -> Int32 {
+    /// - Parameter workingDirectory: 往归档里追加文件时设成镜像目录，
+    ///   这样参数里的相对路径就是归档内的条目路径。
+    private func runWithProgress(
+        _ args: [String],
+        workingDirectory: URL? = nil,
+        progressRange: ClosedRange<Int>
+    ) async -> Int32 {
         let runner = self.runner
         let span = Double(progressRange.upperBound - progressRange.lowerBound)
         return await withCheckedContinuation { continuation in
@@ -681,6 +935,7 @@ final class AppModel: ObservableObject {
                 do {
                     let process = try runner.start(
                         arguments: args,
+                        workingDirectory: workingDirectory,
                         onProgress: { [weak self] event in
                             let mapped = progressRange.lowerBound + Int(Double(event.percent) / 100.0 * span)
                             DispatchQueue.main.async {
@@ -709,14 +964,9 @@ final class AppModel: ObservableObject {
         let runner = self.runner
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
-                var out = ""
-                var err = ""
-                let code = (try? runner.run(
-                    arguments: args,
-                    onLine: { out += $0 + "\n" },
-                    onError: { err += $0 + "\n" }
-                )) ?? -1
-                continuation.resume(returning: (code, out, err))
+                let result = (try? runner.runCollecting(arguments: args))
+                    ?? (code: -1, output: "", error: "")
+                continuation.resume(returning: result)
             }
         }
     }
@@ -790,10 +1040,43 @@ final class AppModel: ObservableObject {
             extractAutomatically(urls)
         case "compress":
             compressAutomatically(urls)
+        case "add":
+            #if DEBUG
+            debugAdd(url)
+            #endif
         default:
             break
         }
     }
+
+    #if DEBUG
+    /// 仅调试构建：`threxo://add?archive=…&dir=子目录&path=…&path=…`
+    ///
+    /// 拖拽本身没法脚本化（要真按鼠标），所以留这个入口跑通
+    /// 「先读归档 → 再追加 → 回读」这条链路，Release 里不存在。
+    private func debugAdd(_ url: URL) {
+        guard let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+              let archivePath = items.first(where: { $0.name == "archive" })?.value else { return }
+        let folder = items.first(where: { $0.name == "dir" })?.value ?? ""
+        let files = items.filter { $0.name == "path" }.compactMap(\.value)
+            .map { URL(fileURLWithPath: $0) }
+        let archive = URL(fileURLWithPath: archivePath)
+
+        Task { @MainActor in
+            let result = await self.list(archive, password: nil)
+            guard result.code == 0 else {
+                appDbg("debugAdd 读取归档失败 code=\(result.code) err=\(result.error)")
+                return
+            }
+            let parsed = ArchiveLister.parse(result.output)
+            self.archiveURL = archive
+            self.entries = parsed
+            self.treeNodes = ArchiveTree.build(parsed)
+            appDbg("debugAdd entries=\(parsed.count) files=\(files.count) dir=\(folder)")
+            self.addDroppedFiles(files, toFolder: folder)
+        }
+    }
+    #endif
 
     // MARK: - Helpers
 
@@ -881,6 +1164,14 @@ final class AppModel: ObservableObject {
             counter += 1
         }
         return candidate
+    }
+
+    /// 归档内路径统一成「无 `./` 前缀、无结尾斜杠」的形式，便于比较与拼层级。
+    static func normalizeEntryPath(_ raw: String) -> String {
+        var path = raw
+        while path.hasPrefix("./") { path.removeFirst(2) }
+        while path.count > 1, path.hasSuffix("/") { path.removeLast() }
+        return path == "." ? "" : path
     }
 
     /// `a.tar.gz` → `a`，`b.zip` → `b`。

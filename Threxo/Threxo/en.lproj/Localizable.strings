@@ -127,6 +127,26 @@
 "已解压 %d 个归档到当前文件夹" = "Extracted %d archives into the current folder";
 "好" = "OK";
 
+/* ===== 拖出解压 / 拖入追加 ===== */
+"把条目拖到访达即解压到那里 · 把文件拖到文件夹行或列表空白处，就加进这个归档" = "Drag items out to Finder to extract them there · Drop files on a folder row (or the list) to add them to this archive";
+"解压到此处" = "Extract Here";
+"解压到压缩包所在文件夹" = "Extract Next to the Archive";
+"解到压缩包所在文件夹，重名自动改名，不覆盖已有文件" = "Extracts into the archive's own folder; existing files are renamed rather than overwritten";
+"解压到同级文件夹" = "Extract into a New Folder";
+"正在添加文件…" = "Adding files…";
+"已添加 %d 项 → %@" = "Added %d item(s) → %@";
+"添加失败" = "Couldn't Add Files";
+"归档里已经有「%@」" = "“%@” is already in this archive";
+"归档里已有 %d 个同名项目" = "%d items with the same names are already in this archive";
+"覆盖会替换归档里的旧内容，且无法撤销。" = "Replacing overwrites the existing content inside the archive and can't be undone.";
+"保留两者" = "Keep Both";
+"覆盖" = "Replace";
+"准备要添加的文件失败：%@" = "Couldn't prepare the files to add: %@";
+"「%@」这种格式装不下多个条目，无法直接追加文件。请先解压再重新打包。" = "A %@ archive can't hold extra entries. Extract it and repack instead.";
+"没有正在打开的归档" = "No archive is open";
+"导出失败：%@" = "Couldn't export: %@";
+"归档里没有找到这个条目" = "That item isn't in the archive";
+
 /* ===== 设置面板 ===== */
 "版本 %@ · 7-Zip 引擎" = "Version %@ · 7-Zip engine";
 "访达右键" = "Finder menu";

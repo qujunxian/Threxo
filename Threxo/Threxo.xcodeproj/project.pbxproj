@@ -22,6 +22,8 @@
 		AA0000000000000000000063 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000064 /* Localizable.strings */; };
 		AA0000000000000000000075 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000073 /* InfoPlist.strings */; };
 		AA0000000000000000000076 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000074 /* Localizable.strings */; };
+		AA0000000000000000000078 /* ArchiveEditing.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000079 /* ArchiveEditing.swift */; };
+		AA000000000000000000007A /* ArchiveExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000007B /* ArchiveExport.swift */; };
 		AA0000000000000000000054 /* CompressionOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000055 /* CompressionOptions.swift */; };
 		AA0000000000000000000056 /* CompressOptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000057 /* CompressOptionsView.swift */; };
 		AA0000000000000000000058 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000059 /* Assets.xcassets */; };
@@ -75,6 +77,8 @@
 		AA0000000000000000000070 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		AA0000000000000000000071 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		AA0000000000000000000072 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		AA0000000000000000000079 /* ArchiveEditing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchiveEditing.swift; sourceTree = "<group>"; };
+		AA000000000000000000007B /* ArchiveExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchiveExport.swift; sourceTree = "<group>"; };
 		AA0000000000000000000055 /* CompressionOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompressionOptions.swift; sourceTree = "<group>"; };
 		AA0000000000000000000057 /* CompressOptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompressOptionsView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000059 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -130,6 +134,8 @@
 				AA0000000000000000000008 /* SevenZipRunner.swift */,
 				AA0000000000000000000010 /* ArchiveLister.swift */,
 				AA0000000000000000000012 /* PathValidator.swift */,
+				AA0000000000000000000079 /* ArchiveEditing.swift */,
+				AA000000000000000000007B /* ArchiveExport.swift */,
 				AA0000000000000000000055 /* CompressionOptions.swift */,
 			);
 			path = Core;
@@ -303,6 +309,8 @@
 				AA0000000000000000000007 /* SevenZipRunner.swift in Sources */,
 				AA0000000000000000000009 /* ArchiveLister.swift in Sources */,
 				AA0000000000000000000011 /* PathValidator.swift in Sources */,
+				AA0000000000000000000078 /* ArchiveEditing.swift in Sources */,
+				AA000000000000000000007A /* ArchiveExport.swift in Sources */,
 				AA0000000000000000000054 /* CompressionOptions.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

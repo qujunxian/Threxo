@@ -64,6 +64,9 @@ final class SevenZipRunner {
         process.executableURL = executableURL
         process.arguments = arguments
         process.currentDirectoryURL = workingDirectory
+        // 7-Zip 会把密码提示写到终端并**一直等输入**；没有终端时就是无限挂起。
+        // 统一接 /dev/null：真需要密码时让它尽快失败，而不是把界面卡在转圈上。
+        process.standardInput = FileHandle.nullDevice
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
@@ -130,6 +133,47 @@ final class SevenZipRunner {
         )
         process.waitUntilExit()
         return process.terminationStatus
+    }
+
+    /// 同步跑一次并收集完整输出。用于列目录、拆中间 tar 这类短命令。
+    ///
+    /// 不用 `start()` 里的可读回调：`waitUntilExit()` 返回时管道可能还没被读空，
+    /// 归档条目一多就会读到半截（表现是「明明有内容却解析出 0 条」）。
+    /// 这里改成从管道读到 EOF，输出完整才返回。
+    func runCollecting(
+        arguments: [String],
+        workingDirectory: URL? = nil
+    ) throws -> (code: Int32, output: String, error: String) {
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = arguments
+        process.currentDirectoryURL = workingDirectory
+        process.standardInput = FileHandle.nullDevice
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        try process.run()
+
+        // stdout / stderr 必须并行读，否则一边写满 64KB 管道，另一边就永远等不到 EOF。
+        var errorData = Data()
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            errorData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
+        let outputData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        group.wait()
+        process.waitUntilExit()
+
+        return (
+            process.terminationStatus,
+            String(data: outputData, encoding: .utf8) ?? "",
+            String(data: errorData, encoding: .utf8) ?? ""
+        )
     }
 
     /// Extracts every `NN%` occurrence from a chunk. 7-Zip writes progress
