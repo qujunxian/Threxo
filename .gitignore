@@ -9,6 +9,7 @@ DerivedData/
 *.xcuserstate
 *.xcscmblueprint
 *.xccheckout
+*.xcresult
 xcuserdata/
 
 # Swift Package Manager
