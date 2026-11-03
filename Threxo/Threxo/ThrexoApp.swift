@@ -106,11 +106,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appDbg("didFinishLaunching")
         // SwiftUI 自身也会注册 URL 事件处理器，这里再装一次确保是我们接。
         installURLEventHandler()
+        // 通知必须在「启动完成」之后再申请授权：更早访问 UNUserNotificationCenter
+        // 会拿到异常状态（实测直接判成 denied，之后再也弹不出授权框）。
+        Notifier.shared.prepare()
 
-        // 访达右键唤起时，URL 事件在启动后几十毫秒内就到；等一小会儿再建窗，
-        // 静默任务就不会出现「窗口闪一下又消失」。
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            guard let self, !self.jobStarted else { return }
+        // 只有「用户直接打开 App」才需要窗口。访达右键唤起时，URL 事件要等
+        // LaunchServices 把 App 拉起来之后才投递，实测冷启动可以晚到 0.5s 以上；
+        // 等待窗口太短就会出现「静默任务先建了个空窗、随后才被收回」的闪烁。
+        // 1.5s 是实测的上界，用户直接双击时这段时间由 Dock 图标的弹跳覆盖。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self else { return }
+            guard !self.jobStarted, !Notifier.shared.launchedFromNotification else { return }
             MainWindowController.shared.show(auto: true)
         }
     }
@@ -126,6 +132,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showMainWindow() {
         MainWindowController.shared.show()
+    }
+
+    /// 外部原因（点击通知）把 App 拉起来时调用：不要自动建窗，只做它该做的事。
+    func suppressAutoWindow() {
+        jobStarted = true
+        MainWindowController.shared.retractIfEmpty()
     }
 
     // MARK: URL Scheme（threxo://extract|compress?path=…）
@@ -164,16 +176,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: 静默任务生命周期
 
-    /// 进入静默模式：不建窗、不抢焦点；本次启动若从未给过界面，连 Dock 图标都不出现。
+    /// 进入静默模式：不建窗、不抢焦点；进度只在菜单栏显示。
     /// - Returns: 是否真的按静默方式跑（主窗口已可见时返回 false，任务进度就显示在窗口里）。
+    ///
+    /// 刻意**不**切 `activationPolicy(.accessory)`：切成后台程序之后系统既不会弹
+    /// 「允许通知」的授权横幅，也会把完成通知静默丢弃（实测横幅完全不出现）。
+    /// 代价只是任务那几秒内 Dock 里有个图标，比"做完没任何反馈"划算得多。
     @discardableResult
     func beginHeadlessJob() -> Bool {
         guard !MainWindowController.shared.isVisible else { return false }
         headlessJobs += 1
         appDbg("beginHeadlessJob hasShown=\(MainWindowController.shared.hasShown)")
-        if !MainWindowController.shared.hasShown {
-            NSApp.setActivationPolicy(.accessory)
-        }
         JobHUD.shared.show(for: AppModel.shared)
         return true
     }
@@ -185,7 +198,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         appDbg("endHeadlessJob")
         JobHUD.shared.hide(after: 1.2)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+        // 收尾要等两件事：菜单栏进度消失、结果通知送达通知中心。
+        // 通知是异步提交给 usernoted 的，进程退得太快会把还没有窗口的横幅一起带走。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) { [weak self] in
             guard let self, self.headlessJobs == 0 else { return }
             guard !MainWindowController.shared.isVisible else { return }
             guard !MainWindowController.shared.hasShown else { return }
@@ -239,9 +254,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         window.orderOut(nil)
         // 这个窗口没真正给用户看过，撤回后仍按「纯静默启动」处理，任务跑完就退出。
         hasShown = false
-        if NSApp.activationPolicy() == .regular {
-            NSApp.setActivationPolicy(.accessory)
-        }
     }
 
     private func makeWindow() -> NSWindow {

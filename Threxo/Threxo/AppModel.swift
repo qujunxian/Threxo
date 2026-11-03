@@ -380,9 +380,19 @@ final class AppModel: ObservableObject {
             if code == 0 {
                 self.progress = 100
                 self.currentItem = nil
+                let folder = archives[0].deletingLastPathComponent()
                 self.statusText = archives.count > 1
                     ? String(format: L("已解压 %d 个归档到当前文件夹"), archives.count)
                     : L("解压完成，文件已放到当前文件夹")
+                if silent {
+                    Notifier.shared.success(
+                        title: archives.count > 1
+                            ? String(format: L("已解压 %d 个归档"), archives.count)
+                            : L("解压完成"),
+                        body: String(format: L("已解压到「%@」"), folder.lastPathComponent),
+                        reveal: folder
+                    )
+                }
             } else {
                 self.statusText = code == 255 ? L("已取消") : L("解压失败")
                 guard code != 255 else { return }
@@ -629,8 +639,10 @@ final class AppModel: ObservableObject {
 
     private func compress(sources: [URL], to dest: URL, silent: Bool = false) {
         // 勾了「压缩完成后删源文件」时先确认一次，默认按钮是取消。
-        guard confirmSourceRemovalIfNeeded(sources: sources) else {
-            if silent { endSilentRun() }
+        // 静默任务不确认也不删——访达右键的约定是「不弹任何框」，
+        // 而删源不可逆，宁可不删，把结果写在通知里。
+        let deleteSource = options.deleteSourceAfterCompress && !silent
+        guard silent || confirmSourceRemovalIfNeeded(sources: sources) else {
             return
         }
 
@@ -679,7 +691,7 @@ final class AppModel: ObservableObject {
                 self.progress = 100  // 7zz 不保证打到 100%，成功后补齐。
                 self.currentItem = nil
                 var message = String(format: L("压缩完成 → %@"), dest.path)
-                if self.options.deleteSourceAfterCompress {
+                if deleteSource {
                     let moved = self.moveToTrash(sources: sources, destination: dest)
                     if moved > 0 {
                         message = String(format: L("压缩完成 → %@（%d 个源文件已移到废纸篓）"), dest.path, moved)
@@ -687,8 +699,17 @@ final class AppModel: ObservableObject {
                 }
                 self.statusText = message
                 self.options.resetPassword()
-                // 静默任务不给界面：不把新包读进窗口，产物就在用户右键的那个目录里。
-                if !silent { self.load(archive: dest) }
+                // 静默任务不给界面：不把新包读进窗口，产物就在用户右键的那个目录里，
+                // 结果通过通知中心交付（跟 Keka 一致）。
+                if silent {
+                    var body = String(format: L("文件「%@」已创建"), dest.lastPathComponent)
+                    if self.options.deleteSourceAfterCompress {
+                        body += L("（源文件已保留，右键压缩不会自动删除）")
+                    }
+                    Notifier.shared.success(title: L("压缩完成"), body: body, reveal: dest)
+                } else {
+                    self.load(archive: dest)
+                }
             } else {
                 self.statusText = code == 255 ? L("已取消") : L("压缩失败")
                 guard code != 255 else { return }
@@ -989,15 +1010,17 @@ final class AppModel: ObservableObject {
         AppDelegate.shared?.endHeadlessJob()
     }
 
-    /// 静默失败必须自己弹窗——窗口里那行红字没人看得见。
+    /// 静默失败一律走通知，不弹任何窗口——右键链路本来就不该打断用户手上的事。
     private func reportSilentFailure(title: String, message: String) {
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = title
-        alert.informativeText = message
-        alert.addButton(withTitle: L("好"))
-        alert.runModal()
+        // 7zz 的原始报错可能好几行，通知正文只留第一段，足够定位问题。
+        let brief = message
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .first
+            .map(String.init) ?? message
+        Notifier.shared.failure(
+            title: title,
+            body: brief.count > 180 ? String(brief.prefix(180)) + "…" : brief
+        )
     }
 
     // MARK: - Task plumbing
@@ -1148,7 +1171,11 @@ final class AppModel: ObservableObject {
     /// 默认归档名：单个项目用它自己的名字，多个项目用「归档」。
     static func defaultArchiveBase(for urls: [URL]) -> String {
         guard urls.count == 1, let first = urls.first else { return L("归档") }
-        let stem = first.deletingPathExtension().lastPathComponent
+        // 对着一个已有归档再压缩，按归档规则取主干（a.tar.gz → a），
+        // 否则会叠成「a.tar.zip」这种需要二次解压的名字。
+        let stem = isArchiveURL(first)
+            ? archiveStem(first)
+            : first.deletingPathExtension().lastPathComponent
         return stem.isEmpty ? L("归档") : stem
     }
 
