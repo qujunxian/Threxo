@@ -16,8 +16,11 @@ func L(_ text: String) -> String {
 
 /// UI-facing state and orchestration for the MVP flow:
 /// open archive -> browse tree -> extract (all / selection) -> create zip.
-/// Also handles `threxo://extract|compress` URL-scheme invocations from FinderSync
-/// and Finder double-click / Dock drops via `receiveOpenFiles`.
+///
+/// 两条链路刻意分开：
+///   · **界面链路**（双击归档、菜单、拖进窗口）：解到同级同名文件夹，可选位置，全部在窗口里反馈；
+///   · **静默链路**（访达右键 `threxo://extract|compress`）：解压到压缩包所在文件夹、
+///     压缩产物落在当前目录，不建主窗口、不弹位置选择，进度只在菜单栏显示。
 final class AppModel: ObservableObject {
     /// 单例：AppDelegate 的 openFiles 回调需要一个稳定入口。
     static let shared = AppModel()
@@ -59,6 +62,10 @@ final class AppModel: ObservableObject {
     /// 用它区分「压缩本身失败」和「文件写出来了但校验不过」——两者的
     /// 后续动作完全不同：后者绝不能删源文件，也不能把包当成可用产物。
     private var verifyFailure: String?
+
+    /// 当前这轮任务跑在静默模式（访达右键）：没有主窗口可依附，
+    /// 所以密码框、失败提示、完成后的跳转都必须走独立弹窗。
+    private var silentRun = false
 
     struct PasswordPrompt: Identifiable {
         let id = UUID()
@@ -264,10 +271,19 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// FinderSync flow: extract each archive into a sibling folder named after it.
+    /// 访达右键：逐个解压到**压缩包所在文件夹**（右键时的那个「当前目录」）。
+    /// 不建窗口、不弹位置选择；已有同名文件由 `-aou` 自动改名，绝不静默覆盖。
     func extractAutomatically(_ urls: [URL]) {
-        guard !isBusy, !urls.isEmpty else { return }
+        guard !urls.isEmpty else { return }
+        guard !isBusy else { NSSound.beep(); return }
+
         let archives = urls
+        // 静默任务和「当前打开的归档」无关，清掉上一份归档的密码状态，
+        // 否则会给没加密的包白弹一次密码框。
+        archivePassword = nil
+        archiveEncrypted = false
+        let silent = beginSilentRun()
+
         runTask(status: L("正在解压…")) { [self] in
             var lastCode: Int32 = 0
             for (index, archive) in archives.enumerated() {
@@ -276,22 +292,35 @@ final class AppModel: ObservableObject {
                         ? String(format: L("正在解压 (%d/%d)…"), index + 1, archives.count)
                         : L("正在解压…")
                 }
-                let dest = uniqueExtractDestination(for: archive)
-                try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
-                lastCode = await extractBlocking(archive: archive, to: dest, items: [])
+                // 当前目录 = 压缩包所在目录：内容直接铺在这里，不再多套一层同名文件夹。
+                let dest = archive.deletingLastPathComponent()
+                lastCode = await extractBlocking(
+                    archive: archive,
+                    to: dest,
+                    items: [],
+                    renameExisting: true
+                )
                 if lastCode != 0 { break }
             }
             return lastCode
         } completion: { code in
+            defer { if silent { self.endSilentRun() } }
+
             if code == 0 {
                 self.progress = 100
                 self.currentItem = nil
                 self.statusText = archives.count > 1
-                    ? String(format: L("已完成 %d 个归档的解压"), archives.count)
-                    : L("解压完成")
+                    ? String(format: L("已解压 %d 个归档到当前文件夹"), archives.count)
+                    : L("解压完成，文件已放到当前文件夹")
             } else {
                 self.statusText = code == 255 ? L("已取消") : L("解压失败")
-                if code != 255 { self.errorMessage = Self.describe(exitCode: code) }
+                guard code != 255 else { return }
+                let detail = Self.describe(exitCode: code)
+                if silent {
+                    self.reportSilentFailure(title: L("解压失败"), message: detail)
+                } else {
+                    self.errorMessage = detail
+                }
             }
         }
     }
@@ -332,10 +361,11 @@ final class AppModel: ObservableObject {
         compress(sources: sources, to: dest)
     }
 
-    /// FinderSync flow: 用当前设置把项目压到第一个项目旁边。
+    /// 访达右键：用当前设置把项目压到第一个项目所在目录（右键时的「当前目录」）。
     /// 不覆盖已有归档：同名时自动追加序号（a.zip → a 2.zip），避免静默丢数据。
     func compressAutomatically(_ urls: [URL]) {
-        guard !isBusy, !urls.isEmpty else { return }
+        guard !urls.isEmpty else { return }
+        guard !isBusy else { NSSound.beep(); return }
         let dir = urls[0].deletingLastPathComponent()
         let base = Self.defaultArchiveBase(for: urls)
         let ext = options.format.fileExtension
@@ -346,12 +376,15 @@ final class AppModel: ObservableObject {
             dest = dir.appendingPathComponent("\(base) \(counter).\(ext)")
             counter += 1
         }
-        compress(sources: urls, to: dest)
+        compress(sources: urls, to: dest, silent: beginSilentRun())
     }
 
-    private func compress(sources: [URL], to dest: URL) {
+    private func compress(sources: [URL], to dest: URL, silent: Bool = false) {
         // 勾了「压缩完成后删源文件」时先确认一次，默认按钮是取消。
-        guard confirmSourceRemovalIfNeeded(sources: sources) else { return }
+        guard confirmSourceRemovalIfNeeded(sources: sources) else {
+            if silent { endSilentRun() }
+            return
+        }
 
         if FileManager.default.fileExists(atPath: dest.path) {
             try? FileManager.default.removeItem(at: dest)
@@ -376,6 +409,8 @@ final class AppModel: ObservableObject {
             }
             return verifyCode == 0 ? 0 : code
         } completion: { code in
+            defer { if silent { self.endSilentRun() } }
+
             // 先处理「压缩成功但校验不过」：产物不可信，此时绝不能删源文件，
             // 也不该像成功那样把包加载出来给用户看。
             if let failure = self.verifyFailure {
@@ -383,8 +418,12 @@ final class AppModel: ObservableObject {
                 self.progress = 100
                 self.currentItem = nil
                 self.statusText = L("压缩已完成，但校验未通过")
-                self.errorMessage = failure
                 self.options.resetPassword()
+                if silent {
+                    self.reportSilentFailure(title: L("压缩已完成，但校验未通过"), message: failure)
+                } else {
+                    self.errorMessage = failure
+                }
                 return
             }
 
@@ -400,10 +439,17 @@ final class AppModel: ObservableObject {
                 }
                 self.statusText = message
                 self.options.resetPassword()
-                self.load(archive: dest)
+                // 静默任务不给界面：不把新包读进窗口，产物就在用户右键的那个目录里。
+                if !silent { self.load(archive: dest) }
             } else {
                 self.statusText = code == 255 ? L("已取消") : L("压缩失败")
-                if code != 255 { self.errorMessage = Self.describe(exitCode: code) }
+                guard code != 255 else { return }
+                let detail = Self.describe(exitCode: code)
+                if silent {
+                    self.reportSilentFailure(title: L("压缩失败"), message: detail)
+                } else {
+                    self.errorMessage = detail
+                }
             }
         }
     }
@@ -442,25 +488,44 @@ final class AppModel: ObservableObject {
 
     // MARK: - Blocking 7zz operations (run off the main thread)
 
-    private func extractBlocking(archive: URL, to dest: URL, items: [String]) async -> Int32 {
+    /// - Parameter renameExisting: 静默解压用 `-aou`：目标目录里已有同名文件时
+    ///   把新解出的文件改名（`a.txt` → `a_1.txt`），不覆盖任何现有文件。
+    private func extractBlocking(
+        archive: URL,
+        to dest: URL,
+        items: [String],
+        renameExisting: Bool = false
+    ) async -> Int32 {
         // 已知有加密条目但还没拿到密码：先问，省掉一次必然失败的解压。
         if archiveEncrypted, archivePassword == nil {
             guard let entered = await askPassword(isRetry: false) else { return 255 }
             archivePassword = entered
         }
 
-        var result = await runExtract(archive: archive, to: dest, items: items, password: archivePassword)
+        var result = await runExtract(
+            archive: archive,
+            to: dest,
+            items: items,
+            password: archivePassword,
+            renameExisting: renameExisting
+        )
 
         // 兜底：有些归档的加密条目在列目录时看不出（例如加密的 rar），
         // 跑到一半才报错，这时再问一次并重跑。
         if result.code != 0, Self.isPasswordError(result.error) {
             guard let entered = await askPassword(isRetry: archivePassword != nil) else { return 255 }
             archivePassword = entered
-            result = await runExtract(archive: archive, to: dest, items: items, password: entered)
+            result = await runExtract(
+                archive: archive,
+                to: dest,
+                items: items,
+                password: entered,
+                renameExisting: renameExisting
+            )
         }
 
         if result.code == 0 {
-            await expandIntermediateTar(archive: archive, destination: dest)
+            await expandIntermediateTar(archive: archive, destination: dest, renameExisting: renameExisting)
         }
         return result.code
     }
@@ -469,10 +534,12 @@ final class AppModel: ObservableObject {
         archive: URL,
         to dest: URL,
         items: [String],
-        password: String?
+        password: String?,
+        renameExisting: Bool = false
     ) async -> (code: Int32, error: String) {
         let runner = self.runner
         var args = ["x", archive.path, "-o\(dest.path)", "-y", "-bsp1", "-bb1", "-p\(password ?? "")"]
+        if renameExisting { args.append("-aou") }
         args.append(contentsOf: items)
 
         return await withCheckedContinuation { continuation in
@@ -508,24 +575,39 @@ final class AppModel: ObservableObject {
 
     /// `.tar.gz` / `.tar.bz2` / `.tar.xz` 是「压缩器套 tar」，7zz 只会解开外层，
     /// 留下一个 `.tar`。这里把中间那一层也拆开，用户直接拿到内容。
-    private func expandIntermediateTar(archive: URL, destination: URL) async {
+    ///
+    /// 静默解压的目标是用户自己的文件夹，里面本来就有东西，所以不能再用
+    /// 「目录里只有一个文件」判断中间产物，改成按归档名去找那个 `.tar`。
+    private func expandIntermediateTar(archive: URL, destination: URL, renameExisting: Bool) async {
         let ext = archive.pathExtension.lowercased()
         guard ["gz", "bz2", "xz", "z", "tgz", "tbz", "tbz2", "txz"].contains(ext) else { return }
 
-        let contents = (try? FileManager.default.contentsOfDirectory(
-            at: destination,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        )) ?? []
-        // 只有「恰好解出一个 .tar」才继续，避免误伤同名内容。
-        guard contents.count == 1,
-              let tar = contents.first,
-              tar.pathExtension.lowercased() == "tar" else { return }
+        let fm = FileManager.default
+        // 常规情形：`a.tar.gz` 解出来就叫 `a.tar`，就落在目标目录里。
+        let expected = destination.appendingPathComponent(Self.archiveStem(archive) + ".tar")
+        var tar: URL?
+        if fm.fileExists(atPath: expected.path) {
+            tar = expected
+        } else {
+            // 兜底：目标目录是刚建出来的空文件夹时（界面链路），里面唯一的 `.tar` 就是它。
+            let listing = (try? fm.contentsOfDirectory(
+                at: destination,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )) ?? []
+            if listing.count == 1, let only = listing.first, only.pathExtension.lowercased() == "tar" {
+                tar = only
+            }
+        }
+        guard let tar else { return }
 
-        let result = await runSync(["x", tar.path, "-o\(destination.path)", "-y", "-bso0", "-bsp0", "-p"])
+        var args = ["x", tar.path, "-o\(destination.path)", "-y", "-bso0", "-bsp0", "-p"]
+        if renameExisting { args.append("-aou") }
+
+        let result = await runSync(args)
         if result.code == 0 {
             // 中间产物是刚才这一步自己解出来的，展开后清掉，不留在用户目录里。
-            try? FileManager.default.removeItem(at: tar)
+            try? fm.removeItem(at: tar)
         }
     }
 
@@ -639,6 +721,35 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: - 静默任务（访达右键）
+
+    /// 进入静默模式：没有主窗口可依附，进度只在菜单栏显示。
+    /// - Returns: 是否真的无窗口运行；主窗口可见时返回 false，任务照旧在窗口里跑。
+    @discardableResult
+    private func beginSilentRun() -> Bool {
+        let headless = AppDelegate.shared?.beginHeadlessJob() ?? false
+        appDbg("beginSilentRun headless=\(headless)")
+        silentRun = headless
+        return headless
+    }
+
+    private func endSilentRun() {
+        guard silentRun else { return }
+        silentRun = false
+        AppDelegate.shared?.endHeadlessJob()
+    }
+
+    /// 静默失败必须自己弹窗——窗口里那行红字没人看得见。
+    private func reportSilentFailure(title: String, message: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: L("好"))
+        alert.runModal()
+    }
+
     // MARK: - Task plumbing
 
     /// Runs `work` off-main with the busy spinner, then calls `completion` on main.
@@ -673,6 +784,7 @@ final class AppModel: ObservableObject {
         let paths = URLComponents(url: url, resolvingAgainstBaseURL: false)?
             .queryItems?.filter { $0.name == "path" }.compactMap(\.value) ?? []
         let urls = paths.map { URL(fileURLWithPath: $0) }
+        appDbg("handleIncomingURL host=\(url.host ?? "nil") paths=\(urls.count)")
         switch url.host {
         case "extract":
             extractAutomatically(urls)
@@ -686,9 +798,15 @@ final class AppModel: ObservableObject {
     // MARK: - Helpers
 
     /// 密码框：挂起等待用户输入，取消返回 nil。
+    ///
+    /// 静默任务没有主窗口，`passwordPrompt` 对应的 sheet 永远弹不出来——那种情况下
+    /// 改用独立的 `NSAlert` 密码框，否则整个任务会卡在等待上，用户只看到进度条不动。
     @MainActor
     private func askPassword(isRetry: Bool) async -> String? {
-        await withCheckedContinuation { continuation in
+        if silentRun {
+            return Self.promptPasswordWithAlert(isRetry: isRetry)
+        }
+        return await withCheckedContinuation { continuation in
             passwordContinuation = continuation
             passwordPrompt = PasswordPrompt(
                 title: isRetry ? L("密码不正确") : L("需要密码"),
@@ -697,6 +815,28 @@ final class AppModel: ObservableObject {
                     : L("这个归档已加密，需要密码才能解压。")
             )
         }
+    }
+
+    /// 无窗口场景的密码输入：阻塞式弹窗，输完继续。
+    private static func promptPasswordWithAlert(isRetry: Bool) -> String? {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = isRetry ? L("密码不正确") : L("需要密码")
+        alert.informativeText = isRetry
+            ? L("这个归档的密码不对，请重新输入。")
+            : L("这个归档已加密，需要密码才能解压。")
+        alert.addButton(withTitle: L("解压"))
+        alert.addButton(withTitle: L("取消"))
+
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.placeholderString = L("密码")
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let text = field.stringValue
+        return text.isEmpty ? nil : text
     }
 
     func submitPassword(_ text: String) {
