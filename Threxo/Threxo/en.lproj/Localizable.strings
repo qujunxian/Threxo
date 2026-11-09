@@ -621,3 +621,26 @@
 "跳过设置，直接开始" = "Skip setup and start using Threxo";
 "不确定该选哪些？点下面的按钮逐个关联即可" = "Not sure? Use the button below to associate them one at a time.";
 "系统处理这次更改比较慢，已刷新状态；如果开关没变，请再点一次。" = "macOS is taking a while on this change. Status refreshed; click again if the switch did not move.";
+
+/* ===== 创建压缩包清单页 / 解压完成卡片（2026-11-09）===== */
+"%d 项 · 合计 %@" = "%d items · %@ total";
+"下一步设置格式与强度" = "Next: choose the format and compression level";
+"从清单里移除" = "Remove from List";
+"保存压缩包" = "Save Archive";
+"保存压缩包…" = "Save Archive…";
+"保留压缩包" = "Keep Archive";
+"先添加文件，才能保存" = "Add files before saving";
+"压缩包详情" = "Archive Details";
+"已选 %d 项，最后确认参数并选保存位置。" = "%d items selected. Confirm the settings, then choose where to save.";
+"搜索" = "Search";
+"是否将「%@」移入废纸篓？" = "Move “%@” to the Trash?";
+"未命名压缩包.%@" = "Untitled.%@";
+"没有匹配的文件" = "No matching files";
+"添加" = "Add";
+"添加文件" = "Add Files";
+"添加文件到压缩包" = "Add Files to the Archive";
+"点击添加文件，或直接将文件拖到这里" = "Click to add files, or drop them here";
+"移除所选" = "Remove Selected";
+"还没有添加文件" = "No files added yet";
+"这些文件已经加进来了，或者已经不在原位置。" = "Those files are already in the list, or are no longer at their original location.";
+"选择要放进压缩包的文件或文件夹" = "Choose the files or folders to put in the archive";

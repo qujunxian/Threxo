@@ -2,34 +2,16 @@ import SwiftUI
 import AppKit
 import Combine
 
-/// 压缩向导的展开状态。用 ObservableObject 而不是 @State，
-/// 与 ContentView 里 DropState / HeaderState 的理由相同（见那里的注释）。
-final class CompressWizardState: ObservableObject {
-    @Published var isPresented: Bool
-    /// 点「选择内容并压缩…」后先把面板收掉，`onDismiss` 里再走选文件流程。
-    @Published var pendingCompress = false
-    /// 访达右键「压缩为…」已经定好的源。非 nil 时向导确认后直接进保存面板，
-    /// 不再让用户选一遍文件（`nil` 表示从工具栏进来的，需要先选内容）。
-    @Published var sources: [URL]?
-
-    init() {
-        #if DEBUG
-        // 仅调试构建：`THREXO_SHOW_WIZARD=1` 直接展开向导，方便脚本截图核对布局。
-        isPresented = ProcessInfo.processInfo.environment["THREXO_SHOW_WIZARD"] == "1"
-        #else
-        isPresented = false
-        #endif
-    }
-}
-
 /// 创建压缩包向导：先问「拿来干什么」，再把结果摊开给人看。
 ///
 /// 用途卡不是黑盒——点一下只是把格式、强度、两个开关拨到位，
 /// 下面概览里立刻显示最终会下发的 7zz 参数，用户随时能改回自定义。
 struct CompressWizardView: View {
     @ObservedObject var options: CompressionOptions
-    /// 源是否已经由调用方给定（访达右键「压缩为…」）。只影响底部按钮文案。
+    /// 源是否已经由调用方给定（创建页清单 / 访达右键）。只影响底部按钮文案。
     var hasSources: Bool = false
+    /// 清单里已选的项目数，用于底部提示。0 表示沿用旧的「下一步选内容」文案。
+    var sourceCount: Int = 0
     let onCancel: () -> Void
     let onConfirm: () -> Void
 
@@ -377,6 +359,10 @@ struct CompressWizardView: View {
                 Label(mismatch, systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(.red)
+            } else if sourceCount > 0 {
+                Text(String(format: L("已选 %d 项，最后确认参数并选保存位置。"), sourceCount))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             } else {
                 Text(hasSources ? L("源已选定，下一步选保存位置。") : L("下一步选要压缩的文件，再选保存位置。"))
                     .font(.system(size: 11))
@@ -385,7 +371,7 @@ struct CompressWizardView: View {
             Spacer(minLength: 0)
             Button(L("取消")) { onCancel() }
                 .keyboardShortcut(.cancelAction)
-            Button(hasSources ? L("选择保存位置…") : L("选择内容并压缩…")) { onConfirm() }
+            Button(sourceCount > 0 ? L("保存压缩包…") : (hasSources ? L("选择保存位置…") : L("选择内容并压缩…"))) { onConfirm() }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
                 .disabled(options.passwordValidationMessage != nil)

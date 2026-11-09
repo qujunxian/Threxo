@@ -320,7 +320,7 @@ final class SettingsStore: ObservableObject {
         conflictPolicy = Self.read(defaults, Key.conflictPolicy, .rename)
         revealAfterExtract = defaults.object(forKey: Key.revealAfterExtract) as? Bool ?? true
         closeAfterExtract = defaults.object(forKey: Key.closeAfterExtract) as? Bool ?? false
-        archiveHandling = Self.read(defaults, Key.archiveHandling, .keep)
+        archiveHandling = Self.read(defaults, Key.archiveHandling, .ask)
         filterSystemAux = defaults.object(forKey: Key.filterSystemAux) as? Bool ?? true
         filterDMGAux = defaults.object(forKey: Key.filterDMGAux) as? Bool ?? true
         quickExtractOnDoubleClick = defaults.object(forKey: Key.quickExtract) as? Bool ?? false
@@ -459,7 +459,7 @@ final class SettingsStore: ObservableObject {
         conflictPolicy = .rename
         revealAfterExtract = true
         closeAfterExtract = false
-        archiveHandling = .keep
+        archiveHandling = .ask
         filterSystemAux = true
         filterDMGAux = true
         quickExtractOnDoubleClick = false

@@ -21,6 +21,13 @@ func L(_ text: String) -> String {
 ///   · **界面链路**（双击归档、菜单、拖进窗口）：解到同级同名文件夹，可选位置，全部在窗口里反馈；
 ///   · **静默链路**（访达右键 `threxo://extract|compress`）：解压到压缩包所在文件夹、
 ///     压缩产物落在当前目录，不建主窗口、不弹位置选择，进度只在菜单栏显示。
+/// 解压完成后问一次「原包要不要移入废纸篓」。
+/// 只有窗口链路会用到；访达右键的静默解压不弹任何东西。
+struct ExtractCompletionPrompt: Identifiable {
+    let id = UUID()
+    let archive: URL
+}
+
 final class AppModel: ObservableObject {
     /// 单例：AppDelegate 的 openFiles 回调需要一个稳定入口。
     static let shared = AppModel()
@@ -94,10 +101,10 @@ final class AppModel: ObservableObject {
 
     /// 解压加密归档时的密码框；非 nil 表示正在等用户输入。
     @Published var passwordPrompt: PasswordPrompt?
+    @Published var extractCompletionPrompt: ExtractCompletionPrompt?
 
     /// 访达右键「压缩为…」传进来的源。非 nil 时界面挂出压缩向导，
     /// 向导确认后直接进保存面板，不再让用户选一遍文件。
-    @Published var compressDialogSources: [URL]?
 
     /// 拖入文件（或追加）成功后要展开并选中的条目，供列表自动定位。
     @Published var revealRequest: RevealRequest?
@@ -629,7 +636,10 @@ final class AppModel: ObservableObject {
                     NSWorkspace.shared.activateFileViewerSelecting([landed])
                 }
                 self.applyArchiveHandling(archive: archive)
-                if SettingsStore.shared.closeAfterExtract, self.archiveURL == archive {
+                // 「每次询问」时由弹窗决定关不关窗口，这里先不抢着关。
+                if self.extractCompletionPrompt == nil,
+                   SettingsStore.shared.closeAfterExtract,
+                   self.archiveURL == archive {
                     self.unloadArchive()
                     MainWindowController.shared.close()
                 }
@@ -698,25 +708,37 @@ final class AppModel: ObservableObject {
     }
 
     /// 解压成功后按设置处理源压缩包。静默链路不走这里——右键解压后删掉源包没人会同意。
+    /// 默认「每次询问」：弹一张卡片让用户自己选，选完再决定窗口去留。
     private func applyArchiveHandling(archive: URL) {
-        let handling = SettingsStore.shared.archiveHandling
-        guard handling != .keep else { return }
-
-        if handling == .ask {
-            let alert = NSAlert()
-            alert.messageText = L("压缩包要保留吗？")
-            alert.informativeText = String(format: L("「%@」可以移入废纸篓，需要时从废纸篓放回即可。"), archive.lastPathComponent)
-            alert.addButton(withTitle: L("保留"))
-            alert.addButton(withTitle: L("移入废纸篓"))
-            guard alert.runModal() == .alertSecondButtonReturn else { return }
+        switch SettingsStore.shared.archiveHandling {
+        case .keep:
+            return
+        case .trash:
+            resolveExtractCompletion(moveToTrash: true, archive: archive)
+        case .ask:
+            extractCompletionPrompt = ExtractCompletionPrompt(archive: archive)
+            // 解压可能刚把访达拉到前台，把 App 拉回来卡片才看得见。
+            NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    /// 卡片上的两个按钮共用这一条收尾路径。
+    /// - 移入废纸篓：源包进废纸篓，清空归档状态并关掉主窗口（退出归档页）。
+    /// - 保留：什么都不做，继续展示这个归档。
+    func resolveExtractCompletion(moveToTrash: Bool, archive: URL? = nil) {
+        let target = archive ?? extractCompletionPrompt?.archive
+        extractCompletionPrompt = nil
+        guard moveToTrash, let target else { return }
 
         var resulting: NSURL?
         do {
-            try FileManager.default.trashItem(at: archive, resultingItemURL: &resulting)
+            try FileManager.default.trashItem(at: target, resultingItemURL: &resulting)
         } catch {
             errorMessage = String(format: L("移到废纸篓失败：%@"), error.localizedDescription)
+            return
         }
+        if archiveURL == target { unloadArchive() }
+        MainWindowController.shared.close()
     }
 
     /// 清空当前归档状态（源包被移走或关闭窗口时用）。
@@ -1247,9 +1269,9 @@ final class AppModel: ObservableObject {
         compress(sources: open.urls)
     }
 
-    /// 源已经定好（访达右键「压缩为…」），只弹保存面板。
-    /// 格式与密码由向导提前选好，这里不能再弹一次选源面板。
-    func compress(sources: [URL]) {
+    /// 源已经定好（创建页清单 / 访达右键「压缩为…」），只弹保存面板。
+    /// `onStarted` 只在保存面板确认、压缩真的启动后调用；用户取消时清单原样保留。
+    func compress(sources: [URL], onStarted: (() -> Void)? = nil) {
         guard !sources.isEmpty else { return }
         guard canStartTask() else { NSSound.beep(); return }
 
@@ -1273,6 +1295,7 @@ final class AppModel: ObservableObject {
             : URL(fileURLWithPath: chosen.path + suffix)
 
         compress(sources: sources, to: dest)
+        onStarted?()
     }
 
     /// 访达右键：用当前设置把项目压到第一个项目所在目录（右键时的「当前目录」）。
@@ -1319,14 +1342,14 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// 访达右键「压缩为…」：先让用户过一遍向导（格式 / 强度 / 密码），再弹保存面板。
-    /// 窗口要先立起来，否则 sheet 没有宿主。
+    /// 访达右键「压缩为…」：先把主窗口立起来，再切到文件清单页并预填这些源。
+    /// 用户可以在清单里继续加、删，保存时才进入参数向导与系统保存面板。
     func beginCompressDialog(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
         MainWindowController.shared.show()
-        // 等窗口真正上屏再挂 sheet，冷启动时 50ms 不够，实测 150ms 稳。
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            self?.compressDialogSources = urls
+        // 冷启动时窗口上屏要一点时间，实测 150ms 稳。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            ComposeArchiveState.shared.activate(sources: urls)
         }
     }
 
@@ -2262,6 +2285,38 @@ final class AppModel: ObservableObject {
         case "mainwindow":
             // 仅调试：不跑向导直接看主窗口空态。
             MainWindowController.shared.show()
+        case "centerWindow":
+            // 仅调试：窗口落在扩展桌面时，截图工具抓不到，挪回主屏再看。
+            if let screen = NSScreen.screens.first,
+               let target = NSApp.mainWindow ?? NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible }) {
+                let area = screen.visibleFrame
+                let size = target.frame.size
+                target.setFrameOrigin(NSPoint(x: area.minX + (area.width - size.width) / 2,
+                                              y: area.minY + (area.height - size.height) / 2))
+            }
+        case "compose":
+            // 仅调试：`threxo://compose?path=…` 直接进创建清单页，可带预填源。
+            MainWindowController.shared.show()
+            ComposeArchiveState.shared.activate(sources: urls)
+        case "composeSave":
+            // 仅调试：验证「保存 → 参数向导」这一步（空清单时不会弹）。
+            MainWindowController.shared.show()
+            if !ComposeArchiveState.shared.items.isEmpty {
+                ComposeArchiveState.shared.showWizard = true
+            }
+        case "extractAll":
+            // 仅调试：走真实的窗口链路解压，验证完成后会自动弹询问卡片。
+            MainWindowController.shared.show()
+            extractAll()
+        case "extractDone":
+            // 仅调试：模拟解压完成卡片，`threxo://extractDone?path=…`。
+            guard let archive = urls.first else { break }
+            MainWindowController.shared.show()
+            extractCompletionPrompt = ExtractCompletionPrompt(archive: archive)
+        case "extractResolve":
+            // 仅调试：`?trash=1|0` 分别验证卡片的两个按钮。
+            let trash = components?.queryItems?.first(where: { $0.name == "trash" })?.value == "1"
+            resolveExtractCompletion(moveToTrash: trash)
         case "onboardingFinish":
             // 仅调试：验证「跳过设置 / 开始使用」走的收尾逻辑。
             OnboardingWindowController.shared.finish()

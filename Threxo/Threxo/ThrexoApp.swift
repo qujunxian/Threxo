@@ -71,7 +71,7 @@ extension Notification.Name {
 
                     Button("压缩…") {
                         MainWindowController.shared.show()
-                        model.compress()
+                        ComposeArchiveState.shared.activate()
                     }
                     .keyboardShortcut("n")
 

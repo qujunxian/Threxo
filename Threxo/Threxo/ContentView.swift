@@ -7,24 +7,24 @@ struct ContentView: View {
     /// 用 ObservableObject 代替 @State：命令行构建环境下 @State 宏依赖的
     /// swift-plugin-server 会被沙箱拦截，这里绕开它。
     @StateObject private var drop = DropState()
-    @StateObject private var wizard = CompressWizardState()
+    /// 创建压缩包的文件清单页（原型 4-1）。激活时整个主窗口切成那一页。
+    @StateObject private var compose = ComposeArchiveState.shared
     @StateObject private var browser = BrowserState()
     @ObservedObject private var options = CompressionOptions.shared
 
     var body: some View {
         Group {
-            // 没打开归档时按原型 3 走独立的欢迎态：顶部品牌 + 设置入口，
-            // 中央大字与两个主按钮，不显示工具栏和状态栏。
-            if model.archiveURL == nil && !model.isBusy {
+            // 创建压缩包：切到文件清单页（原型 4-1），攒够内容才能保存。
+            if compose.isActive {
+                ComposeArchiveView(state: compose, options: options)
+            } else if model.archiveURL == nil && !model.isBusy {
+                // 没打开归档时按原型 3 走独立的欢迎态：顶部品牌 + 设置入口，
+                // 中央大字与两个主按钮，不显示工具栏和状态栏。
                 emptyWindow
             } else {
                 VStack(spacing: 0) {
                     header
                     Divider()
-                    if !model.finderExtensionEnabled {
-                        extensionBanner
-                        Divider()
-                    }
                     content
                     if model.archiveURL != nil, !model.entries.isEmpty, !model.isBusy {
                         Divider()
@@ -63,11 +63,18 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .threxoFocusSearch)) { _ in
             browser.focusSearch()
         }
-        .onChange(of: model.compressDialogSources) { _, urls in
-            guard let urls, !urls.isEmpty else { return }
-            model.compressDialogSources = nil
-            wizard.sources = urls
-            wizard.isPresented = true
+        .overlay {
+            if let prompt = model.extractCompletionPrompt {
+                ZStack {
+                    Color.black.opacity(0.16)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture { }   // 遮罩吃掉点击，别让操作穿透到列表
+                    ExtractCompletionCard(prompt: prompt) { moveToTrash in
+                        model.resolveExtractCompletion(moveToTrash: moveToTrash)
+                    }
+                }
+            }
         }
         .sheet(item: $model.passwordPrompt) { prompt in
             PasswordSheet(
@@ -76,71 +83,30 @@ struct ContentView: View {
                 onCancel: { model.cancelPassword() }
             )
         }
-        .sheet(isPresented: $wizard.isPresented, onDismiss: startPendingCompress) {
-            CompressWizardView(
-                options: options,
-                hasSources: !(wizard.sources?.isEmpty ?? true),
-                onCancel: {
-                    wizard.sources = nil
-                    wizard.isPresented = false
-                },
-                onConfirm: {
-                    // 面板收掉之后再弹系统面板，否则两个 modal 叠在一起会卡住。
-                    wizard.pendingCompress = true
-                    wizard.isPresented = false
-                }
-            )
-        }
-    }
-
-    /// 向导确认后接着走「选源 → 选保存位置」两步，用的仍是 `AppModel.compress()`。
-    /// 源已经由访达右键给定的时候跳过第一步。
-    private func startPendingCompress() {
-        guard wizard.pendingCompress else {
-            wizard.sources = nil
-            return
-        }
-        wizard.pendingCompress = false
-        let sources = wizard.sources
-        wizard.sources = nil
-        if let sources, !sources.isEmpty {
-            model.compress(sources: sources)
-        } else {
-            model.compress()
-        }
     }
 
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Image(systemName: "archivebox")
-                .font(.system(size: 28))
+                .font(.system(size: 19))
                 .foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(model.archiveURL?.lastPathComponent ?? L("千梭"))
-                    .font(.title3.bold())
+                    .font(.system(size: 14, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text(subtitle)
-                    .font(.caption)
+                    .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-            Spacer()
-
-            Button("压缩…") {
-                wizard.sources = nil
-                wizard.isPresented = true
-            }
-                .disabled(model.isBusy)
-                .help(L("打开创建压缩包向导"))
-            Button("打开归档…") { model.openArchive() }
-                .disabled(model.isBusy)
-                .buttonStyle(.borderedProminent)
+            Spacer(minLength: 0)
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
         .background(drop.headerTargeted ? Color.accentColor.opacity(0.10) : Color.clear)
         .dropDestination(for: URL.self) { urls, _ in
             // 标题栏是「换一个归档」的落点：列表区域留给「加进归档」。
@@ -162,32 +128,6 @@ struct ContentView: View {
             ByteFormatter.string(model.totalUncompressedSize),
             url.deletingLastPathComponent().path
         )
-    }
-
-    // MARK: - Finder extension banner
-
-    private var extensionBanner: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "hand.point.up.left.fill")
-                .font(.system(size: 15))
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("访达右键菜单尚未启用")
-                    .font(.callout.weight(.medium))
-                Text("到「系统设置 → 通用 → 登录项与扩展」，在访达扩展里打开「千梭」，右键压缩包即可一键解压。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("刷新") { model.refreshFinderExtensionState() }
-                .controlSize(.small)
-            Button("前往设置") { model.openExtensionSettings() }
-                .controlSize(.small)
-                .buttonStyle(.borderedProminent)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(Color.orange.opacity(0.10))
     }
 
     // MARK: - Content
@@ -264,8 +204,7 @@ struct ContentView: View {
                         .controlSize(.large)
 
                         Button {
-                            wizard.sources = nil
-                            wizard.isPresented = true
+                            compose.activate()
                         } label: {
                             Label(L("创建压缩包"), systemImage: "plus")
                                 .frame(minWidth: 132)
@@ -426,3 +365,50 @@ enum ByteFormatter {
 
 // 预览宏（#Preview）依赖 swift-plugin-server，命令行构建下沙箱会拦截插件进程，暂不启用。
 // #Preview { ContentView().environmentObject(AppModel.shared) }
+
+
+// MARK: - 解压完成卡片
+
+/// 参考原型：解压成功后问一次原包去留。
+/// 选「保留」继续看归档，选「移入废纸篓」则清空归档并关掉主窗口。
+private struct ExtractCompletionCard: View {
+    let prompt: ExtractCompletionPrompt
+    let onChoose: (Bool) -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 52, height: 52)
+            Text(L("解压完成"))
+                .font(.system(size: 14, weight: .bold))
+            Text(String(format: L("是否将「%@」移入废纸篓？"), prompt.archive.lastPathComponent))
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Button(L("保留压缩包")) { onChoose(false) }
+                    .controlSize(.large)
+                Button(L("移入废纸篓")) { onChoose(true) }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .controlSize(.large)
+            }
+            .padding(.top, 4)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 22)
+        .frame(width: 320)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08))
+        )
+        .shadow(color: .black.opacity(0.18), radius: 18, y: 8)
+    }
+}
