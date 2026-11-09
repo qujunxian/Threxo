@@ -28,11 +28,25 @@ struct ExtractCompletionPrompt: Identifiable {
     let archive: URL
 }
 
+/// 一层嵌套压缩包：`url` 是从父包里解到临时目录的内层包。
+/// 退出这一层时把 `tempDirectory` 一起删掉，不把 /tmp 越堆越满。
+struct NestedArchive: Identifiable {
+    let id = UUID()
+    let url: URL
+    let parentURL: URL
+    let entryPath: String
+    let tempDirectory: URL
+}
+
 final class AppModel: ObservableObject {
     /// 单例：AppDelegate 的 openFiles 回调需要一个稳定入口。
     static let shared = AppModel()
 
     @Published var archiveURL: URL?
+    /// 嵌套压缩包的层级栈。空 = 当前看的是磁盘上那个原始包。
+    @Published private(set) var nestedChain: [NestedArchive] = []
+    /// 从内层退回外层时，把刚才那个内嵌包重新选中。
+    private var pendingSelection: String?
     /// 当前归档的全部条目（未过滤）。筛选、排序都在这份原始数据上做，
     /// 这样切换「显示辅助项目」或改搜索词都不必重新读一遍归档。
     @Published private(set) var allEntries: [ArchiveEntry] = []
@@ -315,6 +329,14 @@ final class AppModel: ObservableObject {
     }
 
     func load(archive url: URL) {
+        // 用户主动换了一个包：整条嵌套链和它们的临时文件都作废。
+        closeAllNestedArchives()
+        loadArchive(url)
+    }
+
+    /// 真正把包读进界面。嵌套打开与退回外层都走这里，不动嵌套链。
+    private func loadArchive(_ url: URL, selecting path: String? = nil) {
+        pendingSelection = path
         isBusy = true
         noteActivity()
         progress = 0
@@ -366,6 +388,103 @@ final class AppModel: ObservableObject {
         await runSync(["l", "-slt", "-ba", "-p\(password ?? "")", url.path])
     }
 
+    // MARK: - 嵌套压缩包
+
+    var isNestedArchive: Bool { !nestedChain.isEmpty }
+
+    /// 祖先链：outer.zip › mid.zip，标题与详情栏都用它。
+    var nestedTrail: String {
+        archiveBreadcrumb.dropLast().joined(separator: " › ")
+    }
+
+    /// 面包屑：原始包 › 第一层 › 第二层。
+    var archiveBreadcrumb: [String] {
+        var names: [String] = []
+        if let root = nestedChain.first?.parentURL.lastPathComponent {
+            names.append(root)
+        }
+        names.append(contentsOf: nestedChain.map { $0.url.lastPathComponent })
+        return names
+    }
+
+    /// 这个条目本身是不是压缩包（是的话才能嵌进去看）。
+    func canOpenNested(path: String, isDirectory: Bool) -> Bool {
+        guard !isDirectory else { return false }
+        return Self.isArchiveURL(URL(fileURLWithPath: path))
+    }
+
+    /// 双击一行：目前只有内嵌压缩包有动作。
+    func openEntry(path: String, isDirectory: Bool) {
+        guard canOpenNested(path: path, isDirectory: isDirectory) else { return }
+        openNestedArchive(path: path)
+    }
+
+    /// 把内层包解到临时目录，然后当作当前归档打开。
+    func openNestedArchive(path: String) {
+        guard let archive = archiveURL, canStartTask() else { return }
+        let normalized = Self.normalizeEntryPath(path)
+        guard let entry = allEntries.first(where: { Self.normalizeEntryPath($0.path) == normalized }),
+              !entry.isDirectory,
+              Self.isArchiveURL(URL(fileURLWithPath: normalized)) else { return }
+
+        let password = archivePassword ?? (SettingsStore.shared.vaultAutoTry
+            ? PasswordVault.shared.password(for: archive.lastPathComponent)
+            : nil)
+        let executable = runner.executableURL
+
+        isBusy = true
+        progress = 0
+        errorMessage = nil
+        statusText = L("正在打开内嵌压缩包…")
+        noteActivity()
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            do {
+                let temp = try ArchiveExport.materialize(
+                    archive: archive,
+                    items: [normalized],
+                    pathInArchive: normalized,
+                    password: password,
+                    executable: executable
+                )
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.nestedChain.append(NestedArchive(
+                        url: temp,
+                        parentURL: archive,
+                        entryPath: normalized,
+                        tempDirectory: temp.deletingLastPathComponent()
+                    ))
+                    self.loadArchive(temp)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.isBusy = false
+                    self.statusText = L("打开内嵌压缩包失败")
+                    self.errorMessage = L("这个内嵌压缩包打不开，可能加密了或者文件不完整")
+                }
+            }
+        }
+    }
+
+    /// 退回上一层，顺手删掉这一层的临时文件。
+    func closeNestedArchive() {
+        guard let last = nestedChain.popLast() else { return }
+        try? FileManager.default.removeItem(at: last.tempDirectory)
+        loadArchive(last.parentURL, selecting: last.entryPath)
+    }
+
+    /// 打开别的包、关闭窗口时，把整条链和临时文件清干净。
+    func closeAllNestedArchives() {
+        guard !nestedChain.isEmpty else { return }
+        for level in nestedChain {
+            try? FileManager.default.removeItem(at: level.tempDirectory)
+        }
+        nestedChain = []
+        pendingSelection = nil
+    }
+
     private func finishLoading(
         url: URL,
         result: (code: Int32, output: String, error: String),
@@ -390,6 +509,13 @@ final class AppModel: ObservableObject {
         allEntries = ArchiveLister.parse(result.output)
         baseDirty = true
         rebuildVisible()
+        // 从内层退回来时，把刚才那个内嵌包选中，用户一眼看到自己从哪退的。
+        if let pending = pendingSelection {
+            pendingSelection = nil
+            if let match = entries.first(where: { Self.normalizeEntryPath($0.path) == pending }) {
+                selection = [match.path]
+            }
+        }
         let files = entries.reduce(0) { $0 + ($1.isDirectory ? 0 : 1) }
         statusText = String(format: L("已加载 %@ · %d 个文件"), url.lastPathComponent, files)
     }
@@ -781,6 +907,8 @@ final class AppModel: ObservableObject {
     /// 解压成功后按设置处理源压缩包。静默链路不走这里——右键解压后删掉源包没人会同意。
     /// 默认「每次询问」：弹一张卡片让用户自己选，选完再决定窗口去留。
     private func applyArchiveHandling(archive: URL) {
+        // 内层包在 /tmp 里，问用户「要不要移入废纸篓」没有意义。
+        guard nestedChain.isEmpty else { return }
         switch SettingsStore.shared.archiveHandling {
         case .keep:
             return
@@ -814,6 +942,7 @@ final class AppModel: ObservableObject {
 
     /// 清空当前归档状态（源包被移走或关闭窗口时用）。
     private func unloadArchive() {
+        closeAllNestedArchives()
         archiveURL = nil
         entries = []
         treeNodes = []
@@ -1118,7 +1247,8 @@ final class AppModel: ObservableObject {
 
     /// 当前归档能不能改条目。rar、单流压缩器、分卷包一律不行。
     var canEditCurrentArchive: Bool {
-        guard let archive = archiveURL else { return false }
+        // 内层包是临时解出来的副本，改了也回不到父包里，所以一律不给改。
+        guard let archive = archiveURL, nestedChain.isEmpty else { return false }
         return ArchiveMutator.canEdit(archive)
     }
 
@@ -2394,6 +2524,14 @@ final class AppModel: ObservableObject {
                     .map { state.items[$0].id }
                 if !picked.isEmpty { state.selection = Set(picked) }
             }
+        case "openNested":
+            // 仅调试：`threxo://openNested?path=<包内路径>` 直接打开内嵌压缩包。
+            guard let nestedPath = components?.queryItems?.first(where: { $0.name == "path" })?.value else { break }
+            MainWindowController.shared.show()
+            openNestedArchive(path: nestedPath)
+        case "closeNested":
+            // 仅调试：退回外层。
+            closeNestedArchive()
         case "preview":
             // 仅调试：`threxo://preview?path=<包内路径>` 选中该条目并走一次预览。
             guard let entryPath = components?.queryItems?.first(where: { $0.name == "path" })?.value else { break }

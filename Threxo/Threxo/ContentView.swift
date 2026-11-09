@@ -90,14 +90,39 @@ struct ContentView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
+            // 看的是内层包时，标题左侧给一条回外层的路。
+            if model.isNestedArchive {
+                Button {
+                    model.closeNestedArchive()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(Color(nsColor: .controlBackgroundColor)))
+                        .overlay(Circle().strokeBorder(Color.primary.opacity(0.10)))
+                }
+                .buttonStyle(.borderless)
+                .help(L("返回外层压缩包"))
+            }
+
             Image(systemName: "archivebox")
                 .font(.system(size: 19))
                 .foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 1) {
-                Text(model.archiveURL?.lastPathComponent ?? L("千梭"))
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                HStack(spacing: 6) {
+                    Text(model.archiveURL?.lastPathComponent ?? L("千梭"))
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if model.isNestedArchive {
+                        Text(L("内嵌"))
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1.5)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.16)))
+                    }
+                }
                 Text(subtitle)
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
@@ -122,6 +147,14 @@ struct ContentView: View {
     private var subtitle: String {
         guard let url = model.archiveURL else {
             return L("拖入压缩包即可查看内容 · 拖入文件或文件夹即可压缩")
+        }
+        if model.isNestedArchive {
+            return String(
+                format: L("内嵌于 %@ · %d 个文件 · 解压后 %@"),
+                model.nestedTrail,
+                model.fileCount,
+                ByteFormatter.string(model.totalUncompressedSize)
+            )
         }
         return String(
             format: L("%d 个文件 · 解压后 %@ · %@"),

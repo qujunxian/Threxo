@@ -558,6 +558,10 @@ struct ArchiveIconView: View {
             model.selection = [node.path]
         }
         .contextMenu {
+            if model.canOpenNested(path: node.path, isDirectory: node.isDirectory) {
+                Button(L("打开内嵌压缩包")) { model.openNestedArchive(path: node.path) }
+                Divider()
+            }
             Button("解压到…") { model.extractPaths(model.targets(for: node.path), choosingDestination: true) }
             Button("解压到压缩包所在文件夹") {
                 model.extractPaths(model.targets(for: node.path), choosingDestination: false)
@@ -576,9 +580,12 @@ struct ArchiveIconView: View {
     }
 
     private func open(_ node: ArchiveNode) {
-        guard node.isDirectory, node.children != nil else { return }
-        browser.iconPath.append(node.path)
-        model.selection = []
+        if node.isDirectory, node.children != nil {
+            browser.iconPath.append(node.path)
+            model.selection = []
+        } else if model.canOpenNested(path: node.path, isDirectory: node.isDirectory) {
+            model.openNestedArchive(path: node.path)
+        }
     }
 }
 
@@ -668,6 +675,11 @@ struct ArchiveColumnView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(selected ? Color.accentColor.opacity(0.16) : Color.clear)
         .contentShape(Rectangle())
+        .contextMenu {
+            if model.canOpenNested(path: node.path, isDirectory: node.isDirectory) {
+                Button(L("打开内嵌压缩包")) { model.openNestedArchive(path: node.path) }
+            }
+        }
     }
 }
 
@@ -724,7 +736,13 @@ struct DetailPanelView: View {
                 DetailRow(label: L("项目"), value: String(format: L("%d 项 · %d 个文件"), model.entryCount, model.fileCount))
                 DetailRow(label: L("加密"), value: model.isArchiveEncrypted ? L("是") : L("否"))
                 DetailRow(label: L("修改日期"), value: model.archiveModified.map(DateText.detail) ?? "—")
-                DetailRow(label: L("位置"), value: model.archiveURL?.deletingLastPathComponent().path ?? "—", wraps: true)
+                DetailRow(
+                    label: L("位置"),
+                    value: model.isNestedArchive
+                        ? String(format: L("内嵌于 %@"), model.nestedTrail)
+                        : (model.archiveURL?.deletingLastPathComponent().path ?? "—"),
+                    wraps: true
+                )
             }
 
             if !model.treeNodes.isEmpty {
@@ -781,6 +799,12 @@ struct DetailPanelView: View {
             }
 
             Divider()
+
+            if model.canOpenNested(path: entry.path, isDirectory: entry.isDirectory) {
+                Button(L("打开内嵌压缩包")) { model.openNestedArchive(path: entry.path) }
+                    .controlSize(.small)
+                    .buttonStyle(.borderedProminent)
+            }
 
             HStack(spacing: 8) {
                 Button("解压…") {
@@ -919,7 +943,15 @@ struct ArchiveRowActions: ViewModifier {
                     drop.rowTarget = nil
                 }
             }
+            // 双击：内嵌压缩包直接钻进去看。
+            .simultaneousGesture(TapGesture(count: 2).onEnded {
+                model.openEntry(path: path, isDirectory: isDirectory)
+            })
             .contextMenu {
+                if model.canOpenNested(path: path, isDirectory: isDirectory) {
+                    Button(L("打开内嵌压缩包")) { model.openNestedArchive(path: path) }
+                    Divider()
+                }
                 Button("解压到…") {
                     model.extractPaths(model.targets(for: path), choosingDestination: true)
                 }

@@ -672,3 +672,14 @@
 "空文件夹" = "Empty folder";
 "正在准备预览…" = "Preparing preview…";
 "这个条目解不出来，所以没法预览" = "This item could not be extracted, so it cannot be previewed";
+
+/* ===== 嵌套压缩包（2026-11-09）===== */
+"打开内嵌压缩包" = "Open Nested Archive";
+"返回外层压缩包" = "Back to Outer Archive";
+"内嵌" = "Nested";
+"内嵌于 %@ · %d 个文件 · 解压后 %@" = "Inside %@ · %d files · %@ uncompressed";
+"正在打开内嵌压缩包…" = "Opening nested archive…";
+"打开内嵌压缩包失败" = "Couldn't open the nested archive";
+"这个内嵌压缩包打不开，可能加密了或者文件不完整" = "This nested archive can't be opened — it may be encrypted or incomplete";
+
+"内嵌于 %" = "Inside %";
