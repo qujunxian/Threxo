@@ -151,7 +151,7 @@ struct ContentView: View {
         HStack(spacing: 6) {
             Image(systemName: "hand.draw")
                 .font(.system(size: 10))
-            Text("把条目拖到访达即解压到那里 · 把文件拖到文件夹行、详情区或这条提示栏，就加进这个归档")
+            Text("把条目拖到访达即解压 · 把文件拖进来就加进这个归档")
                 .font(.caption2)
             Spacer()
         }
@@ -276,7 +276,7 @@ struct ContentView: View {
     // MARK: - Footer
 
     private var footer: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             if model.isBusy {
                 ProgressView(value: Double(model.progress), total: 100) {
                     HStack(spacing: 6) {
@@ -292,30 +292,57 @@ struct ContentView: View {
                     }
                 }
                 .progressViewStyle(.linear)
-            }
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
 
-            HStack(spacing: 8) {
-                statusLabel
-                Spacer()
-                if model.isBusy {
-                    Button("取消") { model.cancel() }
-                } else if model.archiveURL != nil {
-                    Button("解压到…") { model.extractChoosingDestination() }
-                        .disabled(model.entries.isEmpty)
-                    if model.hasSelection {
-                        Button("解压到此处") { model.extractPaths(Array(model.selection), choosingDestination: false) }
-                            .help(L("解到压缩包所在文件夹，重名自动改名，不覆盖已有文件"))
-                        Button(String(format: L("解压所选 %d 项"), model.selection.count)) { model.extractSelected() }
-                            .buttonStyle(.borderedProminent)
-                    } else {
-                        Button("解压") { model.extractAll() }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(model.entries.isEmpty)
-                    }
+                HStack(spacing: 8) {
+                    statusLabel
+                    Spacer()
+                    Button(L("取消")) { model.cancel() }
                 }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 8)
+            } else if model.archiveURL != nil {
+                // 解压页的底栏：Mini（占位）→ 全部解压 → 预览，右侧是「解压到…」。
+                ActionBar {
+                    ActionPill {
+                        ActionButton(
+                            title: L("Mini"),
+                            symbol: "rectangle.compress.vertical",
+                            isEnabled: false,
+                            help: L("Mini 形态还在开发，做好后从这里切换")
+                        ) { }
+                        ActionButton(
+                            title: L("全部解压"),
+                            symbol: "arrow.down.to.line",
+                            shortcut: "⏎",
+                            isEnabled: !model.entries.isEmpty,
+                            help: L("把整个压缩包解到新文件夹（回车）")
+                        ) { model.extractAll() }
+                        ActionButton(
+                            title: L("预览"),
+                            symbol: "eye",
+                            shortcut: L("空格"),
+                            isEnabled: model.canPreviewSelection,
+                            help: model.canPreviewSelection
+                                ? L("用系统 QuickLook 预览选中项（空格）")
+                                : L("选中一个文件后就能预览")
+                        ) { model.previewCurrent() }
+                    }
+                    statusLabel
+                } trailing: {
+                    Button(L("解压到…")) { model.extractChoosingDestination() }
+                        .disabled(model.entries.isEmpty)
+                }
+            } else {
+                HStack(spacing: 8) {
+                    statusLabel
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
             }
         }
-        .padding(12)
     }
 
     @ViewBuilder

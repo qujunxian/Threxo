@@ -139,6 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 本次启动是否有静默任务接手。用来判断「还要不要在主窗口里给用户看东西」。
     private var jobStarted = false
     private var headlessJobs = 0
+    private var keyMonitor: Any?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
@@ -157,6 +158,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 外观设置在建第一个窗口之前落地，避免先出浅色再跳深色的闪动。
         SettingsStore.shared.applyAppearance()
+
+        // 底栏写了「空格」「⏎」，就真的让它们能用：预览 / 全部解压。
+        installQuickKeys()
 
         #if DEBUG
         // 仅调试：把压缩向导离屏渲染成 PNG 后退出，便于无界面环境下核对布局。
@@ -291,6 +295,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainWindowController.shared.retractIfEmpty()
         DispatchQueue.main.async {
             AppModel.shared.handleIncomingURL(url)
+        }
+    }
+
+    // MARK: 快捷键
+
+    /// 只在主窗口里、且焦点不在文本输入时生效。
+    /// 用本地监听而不是 `keyboardShortcut`：后者会抢走搜索框里的空格和回车。
+    private func installQuickKeys() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard let window = MainWindowController.shared.shortcutWindow,
+                  window.isKeyWindow, window.attachedSheet == nil else { return event }
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard flags.isEmpty else { return event }
+            // 正在输入文字：空格是空格，回车是回车。
+            if let responder = window.firstResponder,
+               responder is NSTextView || responder is NSTextField {
+                return event
+            }
+
+            let model = AppModel.shared
+            switch event.keyCode {
+            case 49:    // 空格
+                guard model.canPreviewSelection else { return event }
+                model.previewCurrent()
+                return nil
+            case 36, 76: // 回车 / 小键盘回车
+                guard !ComposeArchiveState.shared.isActive,
+                      model.archiveURL != nil, !model.entries.isEmpty,
+                      !model.isBusy else { return event }
+                model.extractAll()
+                return nil
+            default:
+                return event
+            }
         }
     }
 
@@ -429,6 +468,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private var autoShownAtLaunch = false
 
     var isVisible: Bool { window?.isVisible ?? false }
+
+    /// 快捷键判定用：只有主窗口是 key window 时才响应空格 / 回车，
+    /// 免得在系统弹窗、设置页里误触发。
+    var shortcutWindow: NSWindow? { window }
 
     func show(auto: Bool = false) {
         appDbg("MainWindow.show auto=\(auto)")

@@ -652,6 +652,77 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: - 预览
+
+    /// 底栏「预览」能不能点：清单页看本地文件，解压页只认选中的单个文件。
+    var canPreviewSelection: Bool {
+        let compose = ComposeArchiveState.shared
+        if compose.isActive {
+            return compose.previewItem != nil
+        }
+        guard archiveURL != nil, selection.count == 1, let path = selection.first,
+              let entry = entries.first(where: { $0.path == path }) else { return false }
+        return !entry.isDirectory
+    }
+
+    /// 底栏按钮与空格键的统一入口：按当前页面决定预览什么。
+    func previewCurrent() {
+        let compose = ComposeArchiveState.shared
+        if compose.isActive {
+            if let item = compose.previewItem {
+                QuickLookPreview.shared.present([item.url])
+            }
+            return
+        }
+        previewSelectedEntry()
+    }
+
+    private var preparingPreview = false
+
+    /// 包内条目不能直接预览：先解到临时目录，再交给系统 QuickLook。
+    func previewSelectedEntry() {
+        guard !preparingPreview, canStartTask(), let archive = archiveURL,
+              selection.count == 1, let path = selection.first,
+              let entry = entries.first(where: { $0.path == path }), !entry.isDirectory else { return }
+
+        preparingPreview = true
+        let previousStatus = statusText
+        statusText = L("正在准备预览…")
+
+        // 密码用现成的：看过一次加密包之后 archivePassword 已经在了，没有就翻密码本。
+        let password = archivePassword ?? (SettingsStore.shared.vaultAutoTry
+            ? PasswordVault.shared.password(for: archive.lastPathComponent)
+            : nil)
+        let executable = runner.executableURL
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let outcome: Result<URL, Error>
+            do {
+                let url = try ArchiveExport.materialize(
+                    archive: archive,
+                    items: [path],
+                    pathInArchive: path,
+                    password: password,
+                    executable: executable
+                )
+                outcome = .success(url)
+            } catch {
+                outcome = .failure(error)
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.preparingPreview = false
+                self.statusText = previousStatus
+                switch outcome {
+                case .success(let url):
+                    QuickLookPreview.shared.present([url])
+                case .failure:
+                    self.errorMessage = L("这个条目解不出来，所以没法预览")
+                }
+            }
+        }
+    }
+
     // MARK: - 重名与后处理
 
     private enum ConflictChoice {
@@ -2304,6 +2375,17 @@ final class AppModel: ObservableObject {
                let layout = ComposeLayout(rawValue: layoutRaw) {
                 ComposeArchiveState.shared.layout = layout
             }
+            // 仅调试：`&col=2` 预先把某个文件夹在分栏视图里展开。
+            if let colRaw = components?.queryItems?.first(where: { $0.name == "col" })?.value,
+               let index = Int(colRaw), index >= 0, index < ComposeArchiveState.shared.items.count {
+                let state = ComposeArchiveState.shared
+                let item = state.items[index]
+                if item.isDirectory {
+                    state.select(item.id)
+                    state.columnPath = [item.id]
+                    state.loadChildren(of: item.id)
+                }
+            }
             if let selRaw = components?.queryItems?.first(where: { $0.name == "sel" })?.value {
                 let state = ComposeArchiveState.shared
                 let picked = selRaw.split(separator: ",")
@@ -2312,6 +2394,12 @@ final class AppModel: ObservableObject {
                     .map { state.items[$0].id }
                 if !picked.isEmpty { state.selection = Set(picked) }
             }
+        case "preview":
+            // 仅调试：`threxo://preview?path=<包内路径>` 选中该条目并走一次预览。
+            guard let entryPath = components?.queryItems?.first(where: { $0.name == "path" })?.value else { break }
+            MainWindowController.shared.show()
+            selection = [entryPath]
+            previewCurrent()
         case "composeSave":
             // 仅调试：验证「保存 → 参数向导」这一步（空清单时不会弹）。
             MainWindowController.shared.show()

@@ -658,3 +658,17 @@
 "多选时只显示汇总信息" = "Summary only when multiple items are selected";
 "先选中要移除的文件" = "Select items to remove first";
 "返回（放弃这份清单）" = "Back (discard this list)";
+
+/* ===== 底部工具条 / 预览（2026-11-09）===== */
+"预览" = "Preview";
+"空格" = "Space";
+"切换列表、图标与分栏" = "Switch between list, icons, and columns";
+"选中一个文件后就能预览" = "Select a single file to preview";
+"用系统 QuickLook 预览选中的文件（空格）" = "Preview the selected file with QuickLook (Space)";
+"用系统 QuickLook 预览选中项（空格）" = "Preview the selected item with QuickLook (Space)";
+"Mini 形态还在开发，做好后从这里切换" = "Mini is still in development — this will switch to it once ready";
+"把整个压缩包解到新文件夹（回车）" = "Extract the whole archive into a new folder (Return)";
+"正在读取…" = "Reading…";
+"空文件夹" = "Empty folder";
+"正在准备预览…" = "Preparing preview…";
+"这个条目解不出来，所以没法预览" = "This item could not be extracted, so it cannot be previewed";

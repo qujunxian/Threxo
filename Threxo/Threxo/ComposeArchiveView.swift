@@ -22,10 +22,23 @@ struct ComposeItem: Identifiable, Equatable {
     var name: String { url.lastPathComponent }
 }
 
-/// 清单页的展现形式。清单只有一层，分栏视图没有意义，所以只留列表与图标两种。
+/// 分栏视图里「某个文件夹里的一个条目」。只用来展示，不参与清单增删。
+struct ComposeChild: Identifiable, Equatable {
+    let id: String
+    let url: URL
+    let isDirectory: Bool
+    let size: Int64?
+    let modified: Date?
+
+    var name: String { url.lastPathComponent }
+}
+
+/// 清单页的展现形式，三档与解压页保持一致。
+/// 「分栏」在这里是顺着文件夹往里看：清单本身只有一层，但加进来的文件夹可以展开看内容。
 enum ComposeLayout: String, CaseIterable, Identifiable {
     case list
     case icon
+    case column
 
     var id: String { rawValue }
 
@@ -33,6 +46,7 @@ enum ComposeLayout: String, CaseIterable, Identifiable {
         switch self {
         case .list: return L("列表")
         case .icon: return L("图标")
+        case .column: return L("分栏")
         }
     }
 
@@ -40,6 +54,7 @@ enum ComposeLayout: String, CaseIterable, Identifiable {
         switch self {
         case .list: return "list.bullet"
         case .icon: return "square.grid.2x2"
+        case .column: return "rectangle.split.3x1"
         }
     }
 }
@@ -63,10 +78,17 @@ final class ComposeArchiveState: ObservableObject {
     @Published var isDropTargeted = false
     @Published var errorMessage: String?
 
-    /// 列表 / 图标，跟上一次的选择保持一致。
+    /// 列表 / 图标 / 分栏，跟上一次的选择保持一致。
     @Published var layout: ComposeLayout {
         didSet { defaults.set(layout.rawValue, forKey: Key.layout) }
     }
+
+    /// 分栏视图当前钻到了哪些文件夹（下标 0 是清单里的顶层文件夹）。
+    @Published var columnPath: [String] = []
+    /// 分栏视图每一列的缓存：path → 子项。
+    @Published private(set) var columnChildren: [String: [ComposeChild]] = [:]
+    /// 正在读目录的文件夹，给那一列显示加载态。
+    @Published private(set) var columnLoading: Set<String> = []
 
     init() {
         layout = ComposeLayout(rawValue: UserDefaults.standard.string(forKey: Key.layout) ?? "") ?? .list
@@ -81,6 +103,9 @@ final class ComposeArchiveState: ObservableObject {
         pendingCompress = false
         errorMessage = nil
         isDropTargeted = false
+        columnPath = []
+        columnChildren = [:]
+        columnLoading = []
         isActive = true
         appDbg("compose.activate sources=\(sources.count)")
         if !sources.isEmpty { add(sources) }
@@ -95,6 +120,9 @@ final class ComposeArchiveState: ObservableObject {
         selection = []
         searchText = ""
         errorMessage = nil
+        columnPath = []
+        columnChildren = [:]
+        columnLoading = []
     }
 
     func add(_ urls: [URL]) {
@@ -197,6 +225,58 @@ final class ComposeArchiveState: ObservableObject {
         let ext = item.url.pathExtension
         guard !ext.isEmpty, let type = UTType(filenameExtension: ext) else { return L("文件") }
         return type.localizedDescription ?? L("文件")
+    }
+
+    /// 底栏「预览」能不能点：只认选中的单个文件。
+    var previewItem: ComposeItem? {
+        guard let item = singleSelection, !item.isDirectory else { return nil }
+        return item
+    }
+
+    // MARK: 分栏视图的子目录
+
+    func children(of folder: String) -> [ComposeChild]? {
+        columnChildren[folder]
+    }
+
+    func isLoadingChildren(_ folder: String) -> Bool {
+        columnLoading.contains(folder)
+    }
+
+    /// 读一个文件夹的内容。结果缓存起来，来回切列不重复读盘。
+    func loadChildren(of folder: String) {
+        guard columnChildren[folder] == nil, !columnLoading.contains(folder) else { return }
+        columnLoading.insert(folder)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let fm = FileManager.default
+            let keys: Set<URLResourceKey> = [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey]
+            let urls = (try? fm.contentsOfDirectory(
+                at: URL(fileURLWithPath: folder),
+                includingPropertiesForKeys: Array(keys),
+                options: [.skipsHiddenFiles]
+            )) ?? []
+            // 一列放不下几千项，读前 600 个足够看清结构了。
+            let children = urls.prefix(600).compactMap { url -> ComposeChild? in
+                let values = try? url.resourceValues(forKeys: keys)
+                let isDir = values?.isDirectory ?? false
+                return ComposeChild(
+                    id: url.path,
+                    url: url,
+                    isDirectory: isDir,
+                    size: isDir ? nil : Int64(values?.fileSize ?? 0),
+                    modified: values?.contentModificationDate
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.isDirectory != rhs.isDirectory { return lhs.isDirectory }
+                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.columnChildren[folder] = children
+                self.columnLoading.remove(folder)
+            }
+        }
     }
 }
 
@@ -326,8 +406,8 @@ struct ComposeArchiveView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 78)
-            .help(L("切换列表与图标"))
+            .frame(width: 112)
+            .help(L("切换列表、图标与分栏"))
 
             Button {
                 state.removeSelected()
@@ -382,6 +462,8 @@ struct ComposeArchiveView: View {
                 listContent
             case .icon:
                 iconContent
+            case .column:
+                columnContent
             }
         }
     }
@@ -419,6 +501,129 @@ struct ComposeArchiveView: View {
             }
             .padding(14)
         }
+    }
+
+    // MARK: - 分栏
+
+    private struct ComposeColumn {
+        let folder: String
+        let children: [ComposeChild]
+        let isLoading: Bool
+    }
+
+    /// 第 0 列是清单本身，之后每一列是上一列里选中文件夹的内容。
+    private var columnData: [ComposeColumn] {
+        var result: [ComposeColumn] = []
+        let top = state.visibleItems.map {
+            ComposeChild(id: $0.id, url: $0.url, isDirectory: $0.isDirectory,
+                         size: $0.size, modified: $0.modified)
+        }
+        result.append(ComposeColumn(folder: "", children: top, isLoading: false))
+
+        for path in state.columnPath {
+            let children = state.children(of: path)
+            result.append(ComposeColumn(folder: path,
+                                        children: children ?? [],
+                                        isLoading: children == nil))
+            if children == nil { break }
+        }
+        return result
+    }
+
+    private var columnContent: some View {
+        let cols = columnData
+        return ScrollView(.horizontal, showsIndicators: true) {
+            HStack(spacing: 0) {
+                ForEach(Array(cols.enumerated()), id: \.offset) { index, column in
+                    columnList(index: index, column: column)
+                        .frame(width: 220)
+                    if index < cols.count - 1 {
+                        Divider()
+                    }
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
+        }
+        .onChange(of: state.columnPath) { _, path in
+            for folder in path {
+                state.loadChildren(of: folder)
+            }
+        }
+        // 搜索时只看匹配的顶层项，别把上一次钻进去的列留在旁边。
+        .onChange(of: state.searchText) { _, _ in
+            state.columnPath = []
+        }
+    }
+
+    private func columnList(index: Int, column: ComposeColumn) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if column.isLoading {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text(L("正在读取…"))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(12)
+                } else if column.children.isEmpty {
+                    Text(index == 0 ? L("还没有添加文件") : L("空文件夹"))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .padding(12)
+                } else {
+                    ForEach(column.children) { child in
+                        columnRow(child, index: index)
+                            .onTapGesture { dive(child, index: index) }
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .background(index == 0 ? Color.clear : Color(nsColor: .textBackgroundColor).opacity(0.25))
+    }
+
+    private func columnRow(_ child: ComposeChild, index: Int) -> some View {
+        let selected = isColumnSelected(child, index: index)
+        return HStack(spacing: 6) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: child.url.path))
+                .resizable()
+                .frame(width: 15, height: 15)
+            Text(child.name)
+                .font(.system(size: 11.5))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 4)
+            if child.isDirectory {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            } else {
+                Text(ByteFormatter.string(child.size ?? 0))
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(selected ? Color.accentColor.opacity(0.16) : Color.clear)
+        .contentShape(Rectangle())
+    }
+
+    private func isColumnSelected(_ child: ComposeChild, index: Int) -> Bool {
+        if index == 0 { return state.selection.contains(child.id) }
+        return state.columnPath.count > index && state.columnPath[index] == child.id
+    }
+
+    /// 点文件夹就往里钻一层，后面的列自动截断；点文件不改变清单的选择。
+    private func dive(_ child: ComposeChild, index: Int) {
+        guard child.isDirectory else { return }
+        state.columnPath = Array(state.columnPath.prefix(index)) + [child.id]
+        if index == 0 {
+            state.select(child.id)
+        }
+        state.loadChildren(of: child.id)
     }
 
     @ViewBuilder
@@ -481,7 +686,19 @@ struct ComposeArchiveView: View {
     // MARK: - 底部
 
     private var bottomBar: some View {
-        HStack(spacing: 12) {
+        ActionBar {
+            ActionPill {
+                ActionButton(
+                    title: L("预览"),
+                    symbol: "eye",
+                    shortcut: L("空格"),
+                    isEnabled: state.previewItem != nil,
+                    help: state.previewItem == nil
+                        ? L("选中一个文件后就能预览")
+                        : L("用系统 QuickLook 预览选中的文件（空格）")
+                ) { model.previewCurrent() }
+            }
+
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(state.items.isEmpty
@@ -496,40 +713,43 @@ struct ComposeArchiveView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                .lineLimit(1)
                 if let error = state.errorMessage {
                     Text(error)
                         .font(.system(size: 10.5))
                         .foregroundStyle(.orange)
+                        .lineLimit(1)
                 }
             }
-            Spacer(minLength: 8)
-
-            // 唯一的添加入口：大按钮，平时就在最显眼的位置。
-            Button(action: addFiles) {
-                HStack(spacing: 7) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .bold))
-                    Text(L("添加文件"))
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 24)
-                .frame(height: 34)
-                .background(
-                    Capsule().fill(LinearGradient(
-                        colors: [Color(red: 0.62, green: 0.44, blue: 0.99),
-                                 Color(red: 0.52, green: 0.33, blue: 0.94)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ))
-                )
-                .shadow(color: Color.purple.opacity(0.22), radius: 5, y: 2)
-            }
-            .buttonStyle(.plain)
-            .help(L("选择要放进压缩包的文件或文件夹"))
+        } trailing: {
+            addButton
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+    }
+
+    /// 唯一的添加入口：大按钮，平时就在最显眼的位置。
+    private var addButton: some View {
+        Button(action: addFiles) {
+            HStack(spacing: 7) {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .bold))
+                Text(L("添加文件"))
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 24)
+            .frame(height: 34)
+            .background(
+                Capsule().fill(LinearGradient(
+                    colors: [Color(red: 0.62, green: 0.44, blue: 0.99),
+                             Color(red: 0.52, green: 0.33, blue: 0.94)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ))
+            )
+            .shadow(color: Color.purple.opacity(0.22), radius: 5, y: 2)
+        }
+        .buttonStyle(.plain)
+        .help(L("选择要放进压缩包的文件或文件夹"))
     }
 
     // MARK: - 右侧详情
