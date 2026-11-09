@@ -6,7 +6,7 @@ macOS 上的压缩工具。界面是原生 Swift/SwiftUI，压缩引擎用内置
 
 ## 下载安装
 
-从 [Releases](https://github.com/qujunxian/Threxo/releases) 下载 `Threxo-1.0.1-macOS-universal.dmg`，拖进「应用程序」。
+从 [Releases](https://github.com/qujunxian/Threxo/releases) 下载 `Threxo-1.1.0-macOS-universal.dmg`，拖进「应用程序」。
 
 两个首次使用的坎：
 
@@ -17,7 +17,7 @@ macOS 上的压缩工具。界面是原生 Swift/SwiftUI，压缩引擎用内置
 
 ## 用法
 
-先说右键。选中归档时菜单是「用千梭解压」，选中其他东西是「用千梭压缩」，反正只有这一项。
+先说右键。选中归档时是「用千梭解压 / 解压到…」，选中其他东西是「用千梭压缩 / 压缩为…」。
 
 - 解压直接解到压缩包所在文件夹，同名文件自动改名（`a.txt` 变 `a_1.txt`），不覆盖。
 - 压缩产物落在源文件旁边，重名就换序号（`a.zip`、`a 2.zip`）。
