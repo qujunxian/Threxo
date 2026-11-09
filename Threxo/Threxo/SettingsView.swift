@@ -802,6 +802,12 @@ private struct FormatSettingsPage: View {
 
     private var boundCount: Int { state.bindings.filter(\.isDefault).count }
 
+    private var recommendedButtonTitle: String {
+        state.remainingRecommended == 0
+            ? L("常用格式已全部关联")
+            : String(format: L("关联下一个格式（还剩 %d 项）"), state.remainingRecommended)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 10) {
@@ -810,13 +816,19 @@ private struct FormatSettingsPage: View {
                 Text(String(format: L("已关联 %d / %d"), boundCount, state.bindings.count))
                     .font(.system(size: 12.5))
                 Spacer()
-                Button(L("使用推荐设置")) { state.useRecommended() }
+                Button(recommendedButtonTitle) { state.associateNext() }
                     .controlSize(.small)
+                    .disabled(state.remainingRecommended == 0 || !state.pending.isEmpty)
                 Button(L("刷新")) { state.refresh() }
                     .controlSize(.small)
             }
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 9).fill(Color(nsColor: .controlBackgroundColor)))
+
+            Text(L("点一次只改一个格式。macOS 会弹一次确认框，选「使用千梭」；确认完再点下一个。"))
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             if let message = state.message {
                 Text(message).font(.system(size: 11)).foregroundStyle(.red)
@@ -871,7 +883,7 @@ private struct FormatSettingsPage: View {
                 }
             }
 
-            Text(L("关闭开关会还原成接管之前那个默认程序。JAR、DMG 这类格式交给千梭后，双击不再是启动或挂载，打开前会再问一次。"))
+            Text(L("关闭开关会还原成接管之前那个默认程序；原本没有默认程序的格式会落到系统归档实用工具。JAR、DMG 这类格式交给千梭后，双击不再是启动或挂载，打开前会再问一次。"))
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -890,6 +902,14 @@ final class FormatBindingState: ObservableObject {
         bindings = SettingsStore.shared.currentFormatBindings()
     }
 
+    /// 常用组里还没接管的、系统能登记的格式数量。
+    var remainingRecommended: Int {
+        let common = SettingsStore.formatGroups[0]
+        return bindings.filter {
+            $0.group == common && $0.uti != nil && !$0.isDefault
+        }.count
+    }
+
     func set(_ item: SettingsStore.FormatBinding, enabled: Bool) {
         message = nil
         guard !pending.contains(item.id) else { return }
@@ -897,36 +917,23 @@ final class FormatBindingState: ObservableObject {
         pending.insert(item.id)
         let id = item.id
         Task { @MainActor in
+            // setFormatBinding 内部轮询实际状态，最多 6 秒，不会永久挂住。
             if let error = await SettingsStore.shared.setFormatBinding(item, enabled: enabled) {
                 message = error
             }
             pending.remove(id)
             refresh()
         }
-        // macOS 可能弹「允许更改默认应用吗」的确认框；没人在时别让开关永远转圈。
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 15_000_000_000)
-            guard pending.contains(id) else { return }
-            pending.remove(id)
-            message = L("系统可能弹了确认框，请在弹窗里允许更改默认程序后再试一次。")
-            refresh()
-        }
     }
 
-    func useRecommended() {
+    /// 「关联下一个」：一次只改一个格式，避免连着弹一串系统确认框。
+    func associateNext() {
         message = nil
-        Task { @MainActor in
-            let common = SettingsStore.formatGroups[0]
-            for item in bindings {
-                let wanted = item.group == common && item.uti != nil
-                guard item.isDefault != wanted else { continue }
-                if let error = await SettingsStore.shared.setFormatBinding(item, enabled: wanted) {
-                    message = error
-                    break
-                }
-            }
-            refresh()
-        }
+        let common = SettingsStore.formatGroups[0]
+        guard let next = bindings.first(where: {
+            $0.group == common && $0.uti != nil && !$0.isDefault
+        }) else { return }
+        set(next, enabled: true)
     }
 
     private func confirmCautious(_ item: SettingsStore.FormatBinding) -> Bool {

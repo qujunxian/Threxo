@@ -556,8 +556,10 @@ final class SettingsStore: ObservableObject {
 
     /// 切换某个格式的默认程序。
     ///
-    /// `LSSetDefaultRoleHandlerForContentType` 在 macOS 26 上会返回成功但不生效，
-    /// 必须用 NSWorkspace 的 async 版本（系统可能对部分类型弹一次确认）。
+    /// 两个本机实测结论：
+    ///   1. `LSSetDefaultRoleHandlerForContentType` 返回 noErr 但不生效，必须用 NSWorkspace。
+    ///   2. `setDefaultApplication` 的 completion 有时永远不回来，但**更改已经生效**。
+    ///      所以这里不 await 它，改为发起后轮询实际状态，避免界面永远转圈。
     /// - Returns: nil 表示成功，否则是一句可展示的错误。
     func setFormatBinding(_ item: FormatBinding, enabled: Bool) async -> String? {
         guard item.uti != nil,
@@ -569,16 +571,19 @@ final class SettingsStore: ObservableObject {
 
         let target: URL
         if enabled {
-            // 先记下原来的默认程序，关掉开关时才能还原，而不是硬塞给归档实用工具。
+            // 记下原来的默认程序（没有默认就存空串），关掉开关时才能还原。
             let current = LSCopyDefaultRoleHandlerForContentType(
                 type.identifier as CFString, LSRolesMask.all
             )?.takeRetainedValue() as String?
-            if let current, current != bundleID {
-                defaults.set(current, forKey: key)
+            if current != bundleID {
+                defaults.set(current ?? "", forKey: key)
             }
             target = Bundle.main.bundleURL
         } else {
-            let previous = defaults.string(forKey: key) ?? "com.apple.archiveutility"
+            let saved = defaults.string(forKey: key)
+            // 原本没有默认程序的格式（例如我们自定义 UTI 的那些），
+            // 关掉开关时落到系统归档实用工具，不能把空串当 bundle ID 去查。
+            let previous = (saved?.isEmpty == false) ? saved! : "com.apple.archiveutility"
             guard let url = NSWorkspace.shared.urlForApplication(
                 withBundleIdentifier: previous
             ) else {
@@ -587,13 +592,31 @@ final class SettingsStore: ObservableObject {
             target = url
         }
 
-        do {
-            try await NSWorkspace.shared.setDefaultApplication(at: target, toOpen: type)
-        } catch {
-            return error.localizedDescription
+        Task.detached {
+            try? await NSWorkspace.shared.setDefaultApplication(at: target, toOpen: type)
         }
-        if !enabled { defaults.removeObject(forKey: key) }
-        return nil
+
+        // 系统有时要等确认框、有时只是写盘慢，实测 6 秒会误判成失败。
+        // 以实际状态为准，最多等 15 秒；最后一刻再读一次，避免显示错误却已经生效。
+        for _ in 0..<60 {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            let handler = LSCopyDefaultRoleHandlerForContentType(
+                type.identifier as CFString, LSRolesMask.all
+            )?.takeRetainedValue() as String?
+            let settled = enabled ? (handler == bundleID) : (handler != bundleID)
+            if settled {
+                if !enabled { defaults.removeObject(forKey: key) }
+                return nil
+            }
+        }
+        let finalHandler = LSCopyDefaultRoleHandlerForContentType(
+            type.identifier as CFString, LSRolesMask.all
+        )?.takeRetainedValue() as String?
+        let finallySettled = enabled ? (finalHandler == bundleID) : (finalHandler != bundleID)
+        if finallySettled, !enabled { defaults.removeObject(forKey: key) }
+        return finallySettled
+            ? nil
+            : L("系统处理这次更改比较慢，已刷新状态；如果开关没变，请再点一次。")
     }
 
 }

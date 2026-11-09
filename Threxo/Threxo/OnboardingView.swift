@@ -134,7 +134,8 @@ struct OnboardingRootView: View {
     @ViewBuilder
     private var stepContent: some View {
         switch nav.step {
-        case 0: WelcomeStep { nav.step = 1 }
+        case 0: WelcomeStep(start: { nav.step = 1 },
+                            skip: { OnboardingWindowController.shared.finish() })
         case 1: MiniStep(store: store)
         case 2: FormatsStep()
         case 3: FinderStep(store: store)
@@ -154,6 +155,10 @@ struct OnboardingRootView: View {
                         .labelStyle(.titleAndIcon)
                 }
                 .buttonStyle(.borderless)
+
+                Button(L("跳过设置")) { OnboardingWindowController.shared.finish() }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
             } else {
                 Spacer().frame(width: 60)
             }
@@ -192,6 +197,7 @@ struct OnboardingRootView: View {
 
 private struct WelcomeStep: View {
     let start: () -> Void
+    let skip: () -> Void
 
     var body: some View {
         VStack(spacing: 16) {
@@ -211,6 +217,11 @@ private struct WelcomeStep: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .padding(.top, 8)
+
+            Button(L("跳过设置，直接开始")) { skip() }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -304,8 +315,14 @@ private struct FormatsStep: View {
         state.bindings.filter { $0.group == SettingsStore.formatGroups[0] }
     }
 
+    private var recommendedTitle: String {
+        state.remainingRecommended == 0
+            ? L("常用格式已全部关联")
+            : String(format: L("关联下一个格式（还剩 %d 项）"), state.remainingRecommended)
+    }
+
     var body: some View {
-        StepLayout(title: L("关联文件格式"), subtitle: L("不确定该选哪些？用推荐设置即可")) {
+        StepLayout(title: L("关联文件格式"), subtitle: L("不确定该选哪些？点下面的按钮逐个关联即可")) {
             HStack(alignment: .top, spacing: 18) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(L("双击压缩包时，用千梭打开。"))
@@ -314,11 +331,13 @@ private struct FormatsStep: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button(L("使用推荐设置")) { state.useRecommended() }
+                    Button(recommendedTitle) { state.associateNext() }
                         .controlSize(.small)
-                    Text(L("点下去系统可能弹一次确认框，允许即可。"))
+                        .disabled(state.remainingRecommended == 0 || !state.pending.isEmpty)
+                    Text(L("点一次只改一个格式。macOS 会弹一次确认框，选「使用千梭」；确认完再点下一个。"))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if let message = state.message {
                         Text(message).font(.system(size: 10)).foregroundStyle(.red)
                     }

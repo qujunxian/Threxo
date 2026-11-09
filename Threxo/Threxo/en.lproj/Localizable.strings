@@ -610,3 +610,14 @@
 "默认压缩用途" = "Default Compression Purpose";
 "默认用 Mini 打开压缩包" = "Open with Mini by default";
 "用千梭压缩「照片集」" = "Compress “Photos” with Threxo";
+
+/* ===== 格式关联逐个模式 / 跳过按钮 ===== */
+"关联下一个格式（还剩 %d 项）" = "Associate Next Format (%d left)";
+"常用格式已全部关联" = "All Common Formats Associated";
+"点一次只改一个格式。macOS 会弹一次确认框，选「使用千梭」；确认完再点下一个。" = "One format per click. macOS shows a confirmation dialog — choose “Use Threxo”, then click again for the next one.";
+"关闭开关会还原成接管之前那个默认程序；原本没有默认程序的格式会落到系统归档实用工具。JAR、DMG 这类格式交给千梭后，双击不再是启动或挂载，打开前会再问一次。" = "Turning a switch off restores the previous default; formats with no prior default fall back to Archive Utility. Handing JAR or DMG to Threxo means double-click opens archive contents instead of launching or mounting, so we ask once first.";
+"macOS 没有确认这次更改，请在弹出的对话框里选「使用千梭」后再试一次。" = "macOS hasn't confirmed the change. Choose “Use Threxo” in the dialog and try again if the switch didn't move.";
+"跳过设置" = "Skip Setup";
+"跳过设置，直接开始" = "Skip setup and start using Threxo";
+"不确定该选哪些？点下面的按钮逐个关联即可" = "Not sure? Use the button below to associate them one at a time.";
+"系统处理这次更改比较慢，已刷新状态；如果开关没变，请再点一次。" = "macOS is taking a while on this change. Status refreshed; click again if the switch did not move.";

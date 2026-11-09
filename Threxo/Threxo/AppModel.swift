@@ -2262,6 +2262,9 @@ final class AppModel: ObservableObject {
         case "mainwindow":
             // 仅调试：不跑向导直接看主窗口空态。
             MainWindowController.shared.show()
+        case "onboardingFinish":
+            // 仅调试：验证「跳过设置 / 开始使用」走的收尾逻辑。
+            OnboardingWindowController.shared.finish()
         case "vaultTest":
             // 仅调试：验证钥匙串写入 / 读回 / 删除。
             let q = components?.queryItems ?? []
