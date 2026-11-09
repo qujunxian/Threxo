@@ -27,8 +27,11 @@
 		AA000000000000000000007C /* Notifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000007D /* Notifier.swift */; };
 		AA000000000000000000007E /* ArchiveSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000007F /* ArchiveSafety.swift */; };
 		AA0000000000000000000080 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000081 /* AboutView.swift */; };
+		AA0000000000000000000082 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000083 /* SettingsStore.swift */; };
+		AA0000000000000000000084 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000085 /* SettingsView.swift */; };
+		AA0000000000000000000088 /* CompressWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000087 /* CompressWizardView.swift */; };
 		AA0000000000000000000054 /* CompressionOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000055 /* CompressionOptions.swift */; };
-		AA0000000000000000000056 /* CompressOptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000057 /* CompressOptionsView.swift */; };
+		AA0000000000000000000056 /* PasswordSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000057 /* PasswordSheet.swift */; };
 		AA0000000000000000000058 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000059 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -85,8 +88,11 @@
 		AA000000000000000000007D /* Notifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifier.swift; sourceTree = "<group>"; };
 		AA000000000000000000007F /* ArchiveSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchiveSafety.swift; sourceTree = "<group>"; };
 		AA0000000000000000000081 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000083 /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
+		AA0000000000000000000085 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000087 /* CompressWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompressWizardView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000055 /* CompressionOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompressionOptions.swift; sourceTree = "<group>"; };
-		AA0000000000000000000057 /* CompressOptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompressOptionsView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000057 /* PasswordSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordSheet.swift; sourceTree = "<group>"; };
 		AA0000000000000000000059 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -122,7 +128,8 @@
 			children = (
 				AA0000000000000000000006 /* ThrexoApp.swift */,
 				AA0000000000000000000004 /* ContentView.swift */,
-				AA0000000000000000000057 /* CompressOptionsView.swift */,
+				AA0000000000000000000057 /* PasswordSheet.swift */,
+				AA0000000000000000000087 /* CompressWizardView.swift */,
 				AA0000000000000000000002 /* AppModel.swift */,
 				AA0000000000000000000037 /* Core */,
 				AA0000000000000000000038 /* Resources */,
@@ -131,6 +138,7 @@
 				AA0000000000000000000064 /* Localizable.strings */,
 				AA0000000000000000000028 /* Info.plist */,
 				AA0000000000000000000081 /* AboutView.swift */,
+				AA0000000000000000000085 /* SettingsView.swift */,
 			);
 			path = Threxo;
 			sourceTree = "<group>";
@@ -145,6 +153,7 @@
 				AA000000000000000000007B /* ArchiveExport.swift */,
 				AA000000000000000000007D /* Notifier.swift */,
 				AA000000000000000000007F /* ArchiveSafety.swift */,
+				AA0000000000000000000083 /* SettingsStore.swift */,
 				AA0000000000000000000055 /* CompressionOptions.swift */,
 			);
 			path = Core;
@@ -313,7 +322,8 @@
 			files = (
 				AA0000000000000000000001 /* AppModel.swift in Sources */,
 				AA0000000000000000000003 /* ContentView.swift in Sources */,
-				AA0000000000000000000056 /* CompressOptionsView.swift in Sources */,
+				AA0000000000000000000056 /* PasswordSheet.swift in Sources */,
+				AA0000000000000000000088 /* CompressWizardView.swift in Sources */,
 				AA0000000000000000000005 /* ThrexoApp.swift in Sources */,
 				AA0000000000000000000007 /* SevenZipRunner.swift in Sources */,
 				AA0000000000000000000009 /* ArchiveLister.swift in Sources */,
@@ -323,6 +333,8 @@
 				AA000000000000000000007C /* Notifier.swift in Sources */,
 				AA000000000000000000007E /* ArchiveSafety.swift in Sources */,
 				AA0000000000000000000080 /* AboutView.swift in Sources */,
+				AA0000000000000000000082 /* SettingsStore.swift in Sources */,
+				AA0000000000000000000084 /* SettingsView.swift in Sources */,
 				AA0000000000000000000054 /* CompressionOptions.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

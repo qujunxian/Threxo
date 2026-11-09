@@ -40,9 +40,17 @@ func appDbg(_ message: @autoclosure () -> String) {
     }
 
     var body: some Scene {
-        // 只声明设置面板：`Settings` 启动时不建窗，正好当「零窗口」应用的壳。
-        Settings { SettingsPane() }
+        // `Settings` 只为满足「App 必须声明至少一个 Scene」，内容留空。
+        // 真正的设置窗口由 `SettingsWindowController` 按需创建，尺寸和侧边栏才由我们说了算。
+        Settings { EmptyView() }
             .commands {
+                CommandGroup(replacing: .appSettings) {
+                    Button(L("设置…")) {
+                        SettingsWindowController.shared.show()
+                    }
+                    .keyboardShortcut(",")
+                }
+
                 CommandGroup(replacing: .appInfo) {
                     Button(L("关于千梭")) {
                         AboutWindowController.shared.show()
@@ -117,6 +125,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 会拿到异常状态（实测直接判成 denied，之后再也弹不出授权框）。
         Notifier.shared.prepare()
 
+        // 外观设置在建第一个窗口之前落地，避免先出浅色再跳深色的闪动。
+        SettingsStore.shared.applyAppearance()
+
+        #if DEBUG
+        // 仅调试：把压缩向导离屏渲染成 PNG 后退出，便于无界面环境下核对布局。
+        if let path = ProcessInfo.processInfo.environment["THREXO_RENDER_WIZARD"] {
+            renderWizardPreview(to: path)
+            NSApp.terminate(nil)
+            return
+        }
+        #endif
+
         // 只有「用户直接打开 App」才需要窗口。访达右键唤起时，URL 事件要等
         // LaunchServices 把 App 拉起来之后才投递，实测冷启动可以晚到 0.5s 以上；
         // 等待窗口太短就会出现「静默任务先建了个空窗、随后才被收回」的闪烁。
@@ -172,6 +192,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard !urls.isEmpty else { return }
 
+        // 设置里勾了「双击时快速解压」：不进主窗口，直接按右键那套静默链路解到同级目录。
+        if SettingsStore.shared.quickExtractOnDoubleClick,
+           let archive = urls.first(where: { AppModel.isArchiveURL($0) }) {
+            jobStarted = true
+            MainWindowController.shared.retractIfEmpty()
+            DispatchQueue.main.async {
+                AppModel.shared.extractAutomatically([archive])
+            }
+            return
+        }
+
         jobStarted = true
         MainWindowController.shared.retractIfEmpty()
         showMainWindow()
@@ -221,6 +252,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 双击归档 / 拖到 Dock 图标 / Finder「打开方式」——这些是用户主动要界面。
     func application(_ sender: NSApplication, openFiles filenames: [String]) {
         let urls = filenames.map { URL(fileURLWithPath: $0) }
+        if SettingsStore.shared.quickExtractOnDoubleClick,
+           let archive = urls.first(where: { AppModel.isArchiveURL($0) }) {
+            DispatchQueue.main.async {
+                AppModel.shared.extractAutomatically([archive])
+            }
+            sender.reply(toOpenOrPrint: .success)
+            return
+        }
         showMainWindow()
         DispatchQueue.main.async {
             AppModel.shared.receiveOpenFiles(urls)
@@ -264,6 +303,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, self.headlessJobs == 0 else { return }
             guard !MainWindowController.shared.isVisible else { return }
             guard !AboutWindowController.shared.isVisible else { return }
+            guard !SettingsWindowController.shared.isVisible else { return }
             guard !MainWindowController.shared.hasShown else { return }
             appDbg("terminate after headless job")
             NSApp.terminate(nil)
@@ -315,6 +355,11 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         window.orderOut(nil)
         // 这个窗口没真正给用户看过，撤回后仍按「纯静默启动」处理，任务跑完就退出。
         hasShown = false
+    }
+
+    /// 解压设置里勾了「关闭压缩包窗口」时用。
+    func close() {
+        window?.close()
     }
 
     private func makeWindow() -> NSWindow {
@@ -404,72 +449,5 @@ final class JobHUD: NSObject {
 
     @objc private func cancelJob() {
         model?.cancel()
-    }
-}
-
-// MARK: - 设置面板
-
-/// App 里唯一的 Scene。压缩选项在主窗口工具栏里，这里只放说明与版本信息。
-private struct SettingsPane: View {
-    @ObservedObject private var options = CompressionOptions.shared
-
-    private var version: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: "archivebox.fill")
-                    .font(.system(size: 26))
-                    .foregroundStyle(.tint)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L("千梭"))
-                        .font(.title3.bold())
-                    Text(String(format: L("版本 %@ · 7-Zip 引擎"), version))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(L("访达右键"))
-                    .font(.callout.weight(.semibold))
-                Text(L("右键压缩包直接解压到压缩包所在的文件夹；右键文件或文件夹直接在当前目录生成压缩包。两种情况都不会打开主窗口。"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(L("压缩设置"))
-                    .font(.callout.weight(.semibold))
-                Text(String(format: L("格式、级别与密码在主窗口工具栏的滑块按钮里调整，当前格式为 %@。"), options.format.displayName))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(L("关于与许可"))
-                    .font(.callout.weight(.semibold))
-                HStack(spacing: 10) {
-                    Text(L("内置 7-Zip 26.04，其 LGPL 许可要求随 App 可查阅。"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button(L("查看…")) {
-                        AboutWindowController.shared.show()
-                    }
-                    .controlSize(.small)
-                }
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(20)
-        .frame(width: 420, height: 340, alignment: .topLeading)
     }
 }

@@ -7,7 +7,7 @@ struct ContentView: View {
     /// 用 ObservableObject 代替 @State：命令行构建环境下 @State 宏依赖的
     /// swift-plugin-server 会被沙箱拦截，这里绕开它。
     @StateObject private var drop = DropState()
-    @StateObject private var ui = HeaderState()
+    @StateObject private var wizard = CompressWizardState()
     @ObservedObject private var options = CompressionOptions.shared
 
     var body: some View {
@@ -58,6 +58,24 @@ struct ContentView: View {
                 onCancel: { model.cancelPassword() }
             )
         }
+        .sheet(isPresented: $wizard.isPresented, onDismiss: startPendingCompress) {
+            CompressWizardView(
+                options: options,
+                onCancel: { wizard.isPresented = false },
+                onConfirm: {
+                    // 面板收掉之后再弹系统面板，否则两个 modal 叠在一起会卡住。
+                    wizard.pendingCompress = true
+                    wizard.isPresented = false
+                }
+            )
+        }
+    }
+
+    /// 向导确认后接着走「选源 → 选保存位置」两步，用的仍是 `AppModel.compress()`。
+    private func startPendingCompress() {
+        guard wizard.pendingCompress else { return }
+        wizard.pendingCompress = false
+        model.compress()
     }
 
     // MARK: - Format picker
@@ -114,20 +132,9 @@ struct ContentView: View {
 
             formatMenu
 
-            Button {
-                ui.showOptions.toggle()
-            } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 13, weight: .medium))
-            }
-            .buttonStyle(.bordered)
-            .help(L("压缩设置"))
-            .popover(isPresented: $ui.showOptions, arrowEdge: .bottom) {
-                CompressOptionsView(options: options)
-            }
-
-            Button("压缩…") { model.compress() }
+            Button("压缩…") { wizard.isPresented = true }
                 .disabled(model.isBusy)
+                .help(L("打开创建压缩包向导"))
             Button("打开归档…") { model.openArchive() }
                 .disabled(model.isBusy)
                 .buttonStyle(.borderedProminent)
@@ -421,20 +428,6 @@ final class DropState: ObservableObject {
     @Published var rowTarget: String?
     /// 归档拖到标题栏（= 换一个打开）。
     @Published var headerTargeted = false
-}
-
-/// 顶栏的临时状态（设置面板是否展开），同样为了绕开 @State 宏。
-final class HeaderState: ObservableObject {
-    @Published var showOptions: Bool
-
-    init() {
-        #if DEBUG
-        // 仅调试构建：便于脚本化截图核对浮层布局，Release 里恒为 false。
-        showOptions = ProcessInfo.processInfo.environment["THREXO_SHOW_OPTIONS"] == "1"
-        #else
-        showOptions = false
-        #endif
-    }
 }
 
 enum ByteFormatter {

@@ -208,10 +208,30 @@ final class AppModel: ObservableObject {
         archivePassword = password
         archiveEncrypted = result.output.contains("Encrypted = +")
         let parsed = ArchiveLister.parse(result.output)
-        entries = parsed
-        treeNodes = ArchiveTree.build(parsed)
-        let files = parsed.reduce(0) { $0 + ($1.isDirectory ? 0 : 1) }
+        let visible = Self.hidingAuxiliaryItems(parsed)
+        entries = visible
+        treeNodes = ArchiveTree.build(visible)
+        let files = visible.reduce(0) { $0 + ($1.isDirectory ? 0 : 1) }
         statusText = String(format: L("已加载 %@ · %d 个文件"), url.lastPathComponent, files)
+    }
+
+    /// 列表里要不要显示 `__MACOSX`、`.DS_Store` 这类辅助文件。
+    /// 关掉时只影响列表显示，解压行为由解压设置里的内容过滤单独控制。
+    private static func hidingAuxiliaryItems(_ entries: [ArchiveEntry]) -> [ArchiveEntry] {
+        guard !SettingsStore.shared.showAuxiliaryItems else { return entries }
+        return entries.filter { !isAuxiliaryPath($0.path) }
+    }
+
+    private static func isAuxiliaryPath(_ raw: String) -> Bool {
+        let parts = raw.split(separator: "/")
+        for part in parts {
+            if part == "__MACOSX" || part == ".DS_Store" || part == ".fseventsd"
+                || part == ".Trashes" || part == ".background" || part == "Thumbs.db"
+                || part == "desktop.ini" || part.hasPrefix("._") {
+                return true
+            }
+        }
+        return false
     }
 
     /// 双击归档 / 拖到 Dock 图标 / 「打开方式」都会走到这里。
@@ -228,11 +248,39 @@ final class AppModel: ObservableObject {
 
     // MARK: - Extract (UI flows)
 
-    /// 一键解压：解到归档同级的同名文件夹，重名自动加序号，不弹任何面板。
+    /// 一键解压：位置跟随设置。默认解到归档同级的新文件夹，重名自动加序号。
     func extractAll() {
         guard !isBusy, let archive = archiveURL else { return }
-        let dest = uniqueExtractDestination(for: archive)
+        guard let dest = extractionDestination(for: archive) else { return }
         extract(archive: archive, to: dest, items: [], status: L("正在解压…"), reveal: true)
+    }
+
+    /// 按设置决定「解压」按钮落到哪里。
+    /// 默认仍然解到同级的新文件夹——直接铺在源目录旁边，同名文件一多就分不清哪些是刚解出来的。
+    private func extractionDestination(for archive: URL) -> URL? {
+        switch SettingsStore.shared.extractionTarget {
+        case .archiveFolder:
+            return uniqueExtractDestination(for: archive)
+
+        case .lastUsed:
+            let dir = SettingsStore.shared.lastExtractDirectory ?? archive.deletingLastPathComponent()
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            return dir
+
+        case .ask:
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.canCreateDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.message = NSLocalizedString("panel.extractTo.message", comment: "选择解压目标文件夹的提示语")
+            panel.prompt = NSLocalizedString("panel.extractTo.prompt", comment: "解压目标面板的确认按钮")
+            panel.directoryURL = SettingsStore.shared.lastExtractDirectory
+                ?? archive.deletingLastPathComponent()
+            guard panel.runModal() == .OK, let chosen = panel.url else { return nil }
+            SettingsStore.shared.lastExtractDirectory = chosen
+            return chosen
+        }
     }
 
     /// 手动选择解压位置。
@@ -294,8 +342,7 @@ final class AppModel: ObservableObject {
             to: dest,
             items: items,
             status: String(format: L("正在解压所选的 %d 个文件…"), items.count),
-            reveal: true,
-            renameExisting: true
+            reveal: true
         )
     }
 
@@ -325,8 +372,7 @@ final class AppModel: ObservableObject {
             to: dest,
             items: items,
             status: String(format: L("正在解压所选的 %d 个文件…"), items.count),
-            reveal: true,
-            renameExisting: true
+            reveal: true
         )
     }
 
@@ -335,13 +381,29 @@ final class AppModel: ObservableObject {
         to dest: URL,
         items: [String],
         status: String,
-        reveal: Bool,
-        renameExisting: Bool = false
+        reveal: Bool
     ) {
+        // 重名策略以设置为准：界面上的调用点只在「解到压缩包所在文件夹」时传 true，
+        // 其余都是解到新建的空文件夹，本来就不会撞名。
+        let rename: Bool
+        switch SettingsStore.shared.conflictPolicy {
+        case .rename:
+            rename = true
+        case .overwrite:
+            guard confirmOverwrite(to: dest) else { return }
+            rename = false
+        case .ask:
+            switch resolveConflict(to: dest) {
+            case .cancel: return
+            case .rename: rename = true
+            case .overwrite: rename = false
+            }
+        }
+
         try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
 
         runTask(status: status) { [self] in
-            await extractBlocking(archive: archive, to: dest, items: items, renameExisting: renameExisting)
+            await extractBlocking(archive: archive, to: dest, items: items, renameExisting: rename)
         } completion: { code in
             if code == 0 {
                 self.progress = 100  // 7zz 不保证打到 100%，成功后补齐。
@@ -352,8 +414,13 @@ final class AppModel: ObservableObject {
                     self.pendingSafetyNote = nil
                 }
                 self.statusText = text
-                if reveal {
+                if reveal, SettingsStore.shared.revealAfterExtract {
                     NSWorkspace.shared.activateFileViewerSelecting([dest])
+                }
+                self.applyArchiveHandling(archive: archive)
+                if SettingsStore.shared.closeAfterExtract, self.archiveURL == archive {
+                    self.unloadArchive()
+                    MainWindowController.shared.close()
                 }
             } else {
                 self.statusText = code == 255 ? L("已取消") : L("解压失败")
@@ -362,6 +429,93 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: - 重名与后处理
+
+    private enum ConflictChoice {
+        case rename
+        case overwrite
+        case cancel
+    }
+
+    /// 顶层条目名，用来判断「这次解出来的会不会撞上已有的东西」。
+    private func archiveTopLevelNames() -> Set<String> {
+        var names: Set<String> = []
+        for entry in entries {
+            let path = Self.normalizeEntryPath(entry.path)
+            guard let first = path.split(separator: "/").first else { continue }
+            names.insert(String(first))
+        }
+        return names
+    }
+
+    private func resolveConflict(to dest: URL) -> ConflictChoice {
+        let existing = Set(ArchiveSafety.topLevelNames(of: dest))
+        guard !existing.isEmpty else { return .rename }
+
+        let clashes = existing.intersection(archiveTopLevelNames())
+        guard !clashes.isEmpty else { return .rename }
+
+        let sample = clashes.sorted().prefix(3).joined(separator: "、")
+        let alert = NSAlert()
+        alert.messageText = L("目标文件夹里已有同名内容")
+        alert.informativeText = String(
+            format: L("「%@」等 %d 项已经存在。自动改名会保留两份，覆盖会替换掉原文件。"),
+            sample, clashes.count
+        )
+        alert.addButton(withTitle: L("自动改名"))
+        alert.addButton(withTitle: L("覆盖"))
+        alert.addButton(withTitle: L("取消"))
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .rename
+        case .alertSecondButtonReturn: return .overwrite
+        default: return .cancel
+        }
+    }
+
+    /// 覆盖是破坏性的，即使设置里选了「覆盖」，每次动手前也再确认一次。
+    private func confirmOverwrite(to dest: URL) -> Bool {
+        guard !ArchiveSafety.topLevelNames(of: dest).isEmpty else { return true }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = L("将覆盖目标文件夹里的同名文件")
+        alert.informativeText = String(format: L("解压目标：%@"), dest.path)
+        alert.addButton(withTitle: L("覆盖"))
+        alert.addButton(withTitle: L("取消"))
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    /// 解压成功后按设置处理源压缩包。静默链路不走这里——右键解压后删掉源包没人会同意。
+    private func applyArchiveHandling(archive: URL) {
+        let handling = SettingsStore.shared.archiveHandling
+        guard handling != .keep else { return }
+
+        if handling == .ask {
+            let alert = NSAlert()
+            alert.messageText = L("压缩包要保留吗？")
+            alert.informativeText = String(format: L("「%@」可以移入废纸篓，需要时从废纸篓放回即可。"), archive.lastPathComponent)
+            alert.addButton(withTitle: L("保留"))
+            alert.addButton(withTitle: L("移入废纸篓"))
+            guard alert.runModal() == .alertSecondButtonReturn else { return }
+        }
+
+        var resulting: NSURL?
+        do {
+            try FileManager.default.trashItem(at: archive, resultingItemURL: &resulting)
+        } catch {
+            errorMessage = String(format: L("移到废纸篓失败：%@"), error.localizedDescription)
+        }
+    }
+
+    /// 清空当前归档状态（源包被移走或关闭窗口时用）。
+    private func unloadArchive() {
+        archiveURL = nil
+        entries = []
+        treeNodes = []
+        selection = []
+        archivePassword = nil
+        archiveEncrypted = false
     }
 
     /// 访达右键：逐个解压到**压缩包所在文件夹**（右键时的那个「当前目录」）。
@@ -664,7 +818,10 @@ final class AppModel: ObservableObject {
 
         var dest = dir.appendingPathComponent("\(base).\(ext)")
         var counter = 2
-        while FileManager.default.fileExists(atPath: dest.path) {
+        // 分卷包的第一卷是 `xxx.zip.001`，主文件名本身不存在，得连卷一起查，
+        // 否则会撞上上一次留下的同名卷包。
+        while FileManager.default.fileExists(atPath: dest.path)
+            || !Self.volumeSet(for: dest).isEmpty {
             dest = dir.appendingPathComponent("\(base) \(counter).\(ext)")
             counter += 1
         }
@@ -680,8 +837,26 @@ final class AppModel: ObservableObject {
             return
         }
 
+        let volumeMode = options.format.supportsVolume
+            && options.volumeSize.megabytes(custom: options.customVolumeMB) != nil
+        let oldVolumes = volumeMode ? Self.volumeSet(for: dest) : []
+
         if FileManager.default.fileExists(atPath: dest.path) {
             try? FileManager.default.removeItem(at: dest)
+        } else if !oldVolumes.isEmpty {
+            // 同名旧卷包还在（xxx.zip.001 …）：必须先问一句再删。
+            // 静默链路不弹框（访达右键的约定），此时直接放弃并提示，让用户自己改名。
+            if silent {
+                reportSilentFailure(
+                    title: L("目标位置已有同名分卷包"),
+                    message: String(format: L("「%@」已存在。请换个名字，或先在主窗口里重压一次。"),
+                                    oldVolumes[0].lastPathComponent)
+                )
+                endSilentRun()
+                return
+            }
+            guard confirmReplacingVolumeSet(oldVolumes) else { return }
+            Self.removeVolumeSet(for: dest)
         }
 
         let verify = options.verifyAfterCompress
@@ -691,12 +866,19 @@ final class AppModel: ObservableObject {
         let compressCap = verify ? 90 : 100
 
         runTask(status: L("正在压缩…")) { [self] in
-            let code = await compressBlocking(sources: sources, to: dest, progressCap: compressCap)
+            let code = await compressBlocking(
+                sources: sources,
+                to: dest,
+                progressCap: compressCap,
+                // 右键静默压缩不分卷：分卷是「交付」时的选择，不该被一次右键带出来。
+                includeVolume: !silent
+            )
             guard code == 0, verify else { return code }
 
             self.statusText = L("正在校验归档…")
             self.currentItem = nil
-            let verifyCode = await verifyArchive(dest)
+            // 分卷时真正落盘的是 `xxx.zip.001`，校验要指向第一卷，指 dest 会找不到文件。
+            let verifyCode = await verifyArchive(Self.producedArchive(for: dest))
             // 255 是用户自己点了取消，不算校验失败，也不该报错。
             if verifyCode != 0, verifyCode != 255 {
                 self.verifyFailure = Self.describeVerifyFailure(code: verifyCode)
@@ -704,6 +886,7 @@ final class AppModel: ObservableObject {
             return verifyCode == 0 ? 0 : code
         } completion: { code in
             defer { if silent { self.endSilentRun() } }
+            let produced = Self.producedArchive(for: dest)
 
             // 先处理「压缩成功但校验不过」：产物不可信，此时绝不能删源文件，
             // 也不该像成功那样把包加载出来给用户看。
@@ -724,11 +907,14 @@ final class AppModel: ObservableObject {
             if code == 0 {
                 self.progress = 100  // 7zz 不保证打到 100%，成功后补齐。
                 self.currentItem = nil
-                var message = String(format: L("压缩完成 → %@"), dest.path)
+                var message = String(format: L("压缩完成 → %@"), produced.path)
+                if let volumeCount = Self.volumeCount(for: produced), volumeCount > 1 {
+                    message += String(format: L("（共 %d 卷）"), volumeCount)
+                }
                 if deleteSource {
-                    let moved = self.moveToTrash(sources: sources, destination: dest)
+                    let moved = self.moveToTrash(sources: sources, destination: produced)
                     if moved > 0 {
-                        message = String(format: L("压缩完成 → %@（%d 个源文件已移到废纸篓）"), dest.path, moved)
+                        message = String(format: L("压缩完成 → %@（%d 个源文件已移到废纸篓）"), produced.path, moved)
                     }
                 }
                 self.statusText = message
@@ -736,13 +922,13 @@ final class AppModel: ObservableObject {
                 // 静默任务不给界面：不把新包读进窗口，产物就在用户右键的那个目录里，
                 // 结果通过通知中心交付（跟 Keka 一致）。
                 if silent {
-                    var body = String(format: L("文件「%@」已创建"), dest.lastPathComponent)
+                    var body = String(format: L("文件「%@」已创建"), produced.lastPathComponent)
                     if self.options.deleteSourceAfterCompress {
                         body += L("（源文件已保留，右键压缩不会自动删除）")
                     }
-                    Notifier.shared.success(title: L("压缩完成"), body: body, reveal: dest)
+                    Notifier.shared.success(title: L("压缩完成"), body: body, reveal: produced)
                 } else {
-                    self.load(archive: dest)
+                    self.load(archive: produced)
                 }
             } else {
                 self.statusText = code == 255 ? L("已取消") : L("压缩失败")
@@ -757,9 +943,66 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: - 分卷产物
+
+    /// 分卷压缩落盘的是 `xxx.zip.001`，界面上要打开、要展示的是第一卷。
+    /// 不分卷时原样返回 dest。
+    private static func producedArchive(for dest: URL) -> URL {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: dest.path) { return dest }
+        let first = URL(fileURLWithPath: dest.path + ".001")
+        if fm.fileExists(atPath: first.path) { return first }
+        return dest
+    }
+
+    /// 卷数：第一卷存在时数同名的三位数字后缀文件；不是卷包就返回 nil。
+    private static func volumeCount(for archive: URL) -> Int? {
+        guard archive.path.hasSuffix(".001") else { return nil }
+        let base = String(archive.path.dropLast(4))
+        let fm = FileManager.default
+        var count = 0
+        while fm.fileExists(atPath: String(format: "%@.%03d", base, count + 1)) {
+            count += 1
+        }
+        return count > 0 ? count : nil
+    }
+
+    /// 与 dest 同名的卷包（`xxx.zip.001` 起的三位序号文件）。
+    /// 只认这一串，别的归档一律不碰。
+    private static func volumeSet(for dest: URL) -> [URL] {
+        let fm = FileManager.default
+        let dir = dest.deletingLastPathComponent()
+        let prefix = dest.lastPathComponent + "."
+        guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return [] }
+        return names.compactMap { name -> URL? in
+            guard name.hasPrefix(prefix) else { return nil }
+            let suffix = name.dropFirst(prefix.count)
+            guard suffix.count == 3, suffix.allSatisfy(\.isNumber) else { return nil }
+            return dir.appendingPathComponent(name)
+        }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    private static func removeVolumeSet(for dest: URL) {
+        for url in volumeSet(for: dest) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// 覆盖旧卷包会连带删掉用户已有的产物，动手前必须问一句。
+    private func confirmReplacingVolumeSet(_ volumes: [URL]) -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = String(format: L("目标位置已有同名分卷包（共 %d 卷）"), volumes.count)
+        alert.informativeText = String(format: L("「%@」将被替换，旧卷包会直接删除，无法从废纸篓恢复。"),
+                                      volumes[0].lastPathComponent)
+        alert.addButton(withTitle: L("取消"))
+        alert.addButton(withTitle: L("替换"))
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
     /// 压缩后删源文件属于不可轻易撤销的操作，即使设置里已经勾选也要再确认一次。
-    private func confirmSourceRemovalIfNeeded(sources: [URL]) -> Bool {
-        guard options.deleteSourceAfterCompress else { return true }
+    private func confirmSourceRemovalIfNeeded(sources: [URL]) -> Bool {        guard options.deleteSourceAfterCompress else { return true }
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -913,6 +1156,19 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// 解压时排除的辅助文件。只影响解压产物，不改变压缩包本身。
+    private static func extractionExcludes() -> [String] {
+        let settings = SettingsStore.shared
+        var args: [String] = []
+        if settings.filterSystemAux {
+            args += ["-xr!__MACOSX", "-xr!.DS_Store", "-xr!._*", "-xr!Thumbs.db", "-xr!desktop.ini"]
+        }
+        if settings.filterDMGAux {
+            args += ["-xr!.background", "-xr!.fseventsd", "-xr!.Trashes", "-xr!.VolumeIcon.icns"]
+        }
+        return args
+    }
+
     private func runExtract(
         archive: URL,
         to dest: URL,
@@ -923,6 +1179,7 @@ final class AppModel: ObservableObject {
         let runner = self.runner
         var args = ["x", archive.path, "-o\(dest.path)", "-y", "-bsp1", "-bb1", "-p\(password ?? "")"]
         if renameExisting { args.append("-aou") }
+        args.append(contentsOf: Self.extractionExcludes())
         args.append(contentsOf: items)
 
         return await withCheckedContinuation { continuation in
@@ -994,12 +1251,22 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func compressBlocking(sources: [URL], to dest: URL, progressCap: Int) async -> Int32 {
+    private func compressBlocking(
+        sources: [URL],
+        to dest: URL,
+        progressCap: Int,
+        includeVolume: Bool
+    ) async -> Int32 {
         // gzip / bzip2 / xz 一次只能压一个文件流，目录或多项必须先打 tar。
         if options.format.isSingleStream, sources.count > 1 || sources.contains(where: Self.isDirectory) {
             return await compressViaTar(sources: sources, to: dest, progressCap: progressCap)
         }
-        return await runCompress(sources: sources, to: dest, progressRange: 0...progressCap)
+        return await runCompress(
+            sources: sources,
+            to: dest,
+            progressRange: 0...progressCap,
+            includeVolume: includeVolume
+        )
     }
 
     /// 压缩后自检。`7zz t` 只读归档、逐项比对 CRC，不落盘。
@@ -1012,9 +1279,14 @@ final class AppModel: ObservableObject {
         return await runWithProgress(args, progressRange: 90...100)
     }
 
-    private func runCompress(sources: [URL], to dest: URL, progressRange: ClosedRange<Int>) async -> Int32 {
+    private func runCompress(
+        sources: [URL],
+        to dest: URL,
+        progressRange: ClosedRange<Int>,
+        includeVolume: Bool
+    ) async -> Int32 {
         var args = ["a", dest.path]
-        args.append(contentsOf: options.extraArguments())
+        args.append(contentsOf: options.extraArguments(includeVolume: includeVolume))
         args.append(contentsOf: ["-bsp1", "-bb1"])
         args.append(contentsOf: sources.map(\.path))
         return await runWithProgress(args, progressRange: progressRange)
@@ -1036,9 +1308,7 @@ final class AppModel: ObservableObject {
 
         let tarURL = tmpDir.appendingPathComponent("payload.tar")
         var tarArgs = ["a", tarURL.path, "-ttar"]
-        if options.excludeMacResources {
-            tarArgs.append(contentsOf: CompressionOptions.macResourceExcludes)
-        }
+        tarArgs.append(contentsOf: options.excludeArguments())
         tarArgs.append(contentsOf: ["-bso0", "-bsp0"])
         tarArgs.append(contentsOf: sources.map(\.path))
 
@@ -1187,6 +1457,11 @@ final class AppModel: ObservableObject {
         case "about":
             // 仅调试：脚本里验一下关于/许可页能正常渲染，Release 不存在这个入口。
             AboutWindowController.shared.show()
+        case "settings":
+            // 仅调试：`threxo://settings?page=extract` 直接落到某一页，方便逐页核对布局。
+            let page = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "page" })?.value
+            SettingsWindowController.shared.show(page: SettingsPage(rawValue: page ?? "") ?? .general)
         #endif
         default:
             break
@@ -1352,6 +1627,10 @@ final class AppModel: ObservableObject {
 
     static func isArchiveURL(_ url: URL) -> Bool {
         let ext = url.pathExtension.lowercased()
+        // 分卷包的第一卷（xxx.zip.001）：去掉 .001 之后仍然是归档，认它。
+        if ext == "001" {
+            return archiveExtensions.contains(url.deletingPathExtension().pathExtension.lowercased())
+        }
         if archiveExtensions.contains(ext) { return true }
         return url.deletingPathExtension().pathExtension.lowercased() == "tar"
     }
