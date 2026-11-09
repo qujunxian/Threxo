@@ -228,18 +228,31 @@ struct ContentView: View {
     }
 
     /// 两件事都不容易被发现，用一行灰字点出来。
+    ///
+    /// 这条提示栏同时兼任「加进归档根目录」的投放点：列表下方那片空白属于
+    /// `NSTableView`，指针停在那里时拖拽会被表格吞掉（行级接收器只覆盖有行的
+    /// 区域），所以在列表外面留一个稳定可用的落点。
     private var hintBar: some View {
         HStack(spacing: 6) {
             Image(systemName: "hand.draw")
                 .font(.system(size: 10))
-            Text("把条目拖到访达即解压到那里 · 把文件拖到文件夹行或列表空白处，就加进这个归档")
+            Text("把条目拖到访达即解压到那里 · 把文件拖到文件夹行、详情区或这条提示栏，就加进这个归档")
                 .font(.caption2)
             Spacer()
         }
-        .foregroundStyle(.secondary)
+        .foregroundStyle(drop.isTargeted ? Color.accentColor : Color.secondary)
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .background(Color.primary.opacity(0.03))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .background(Color.primary.opacity(drop.isTargeted ? 0.07 : 0.03))
+        .dropDestination(for: URL.self) { urls, _ in
+            guard !urls.isEmpty else { return false }
+            model.addDroppedFiles(urls, toFolder: nil)
+            return true
+        } isTargeted: { inside in
+            drop.isTargeted = inside
+        }
     }
 
     private var emptyState: some View {
