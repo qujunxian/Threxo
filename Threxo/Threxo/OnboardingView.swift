@@ -83,6 +83,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
 struct OnboardingRootView: View {
     @ObservedObject var nav: OnboardingNav
     @ObservedObject private var store = SettingsStore.shared
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(spacing: 0) {
@@ -117,10 +118,12 @@ struct OnboardingRootView: View {
         .background {
             if nav.step == 0 {
                 LinearGradient(
-                    colors: [
-                        Color(red: 1.0, green: 0.95, blue: 0.95),
-                        Color(red: 0.93, green: 0.94, blue: 1.0),
-                    ],
+                    // 欢迎页的浅粉紫渐变在深色模式下配白字看不清，按外观换一套。
+                    colors: colorScheme == .dark
+                        ? [Color(red: 0.19, green: 0.12, blue: 0.18),
+                           Color(red: 0.11, green: 0.12, blue: 0.21)]
+                        : [Color(red: 1.0, green: 0.95, blue: 0.95),
+                           Color(red: 0.93, green: 0.94, blue: 1.0)],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )

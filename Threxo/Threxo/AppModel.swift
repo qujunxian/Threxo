@@ -2298,6 +2298,20 @@ final class AppModel: ObservableObject {
             // 仅调试：`threxo://compose?path=…` 直接进创建清单页，可带预填源。
             MainWindowController.shared.show()
             ComposeArchiveState.shared.activate(sources: urls)
+            // 仅调试：`&sel=0` / `&sel=1,2` 预选清单项、`&layout=icon` 切图标视图，
+            // 用来核对右侧详情栏与两种版式。
+            if let layoutRaw = components?.queryItems?.first(where: { $0.name == "layout" })?.value,
+               let layout = ComposeLayout(rawValue: layoutRaw) {
+                ComposeArchiveState.shared.layout = layout
+            }
+            if let selRaw = components?.queryItems?.first(where: { $0.name == "sel" })?.value {
+                let state = ComposeArchiveState.shared
+                let picked = selRaw.split(separator: ",")
+                    .compactMap { Int($0) }
+                    .filter { $0 >= 0 && $0 < state.items.count }
+                    .map { state.items[$0].id }
+                if !picked.isEmpty { state.selection = Set(picked) }
+            }
         case "composeSave":
             // 仅调试：验证「保存 → 参数向导」这一步（空清单时不会弹）。
             MainWindowController.shared.show()

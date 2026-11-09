@@ -4,6 +4,7 @@ import Combine
 
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
     /// 用 ObservableObject 代替 @State：命令行构建环境下 @State 宏依赖的
     /// swift-plugin-server 会被沙箱拦截，这里绕开它。
     @StateObject private var drop = DropState()
@@ -171,11 +172,14 @@ struct ContentView: View {
 
     private var emptyWindow: some View {
         ZStack(alignment: .top) {
+            // 渐变是固定的浅粉紫，深色模式下文字会变成白色，读不清；
+            // 所以按外观切换一套深色渐变。
             LinearGradient(
-                colors: [
-                    Color(red: 1.0, green: 0.95, blue: 0.95).opacity(0.85),
-                    Color(red: 0.93, green: 0.94, blue: 1.0).opacity(0.85),
-                ],
+                colors: colorScheme == .dark
+                    ? [Color(red: 0.19, green: 0.12, blue: 0.18),
+                       Color(red: 0.11, green: 0.12, blue: 0.21)]
+                    : [Color(red: 1.0, green: 0.95, blue: 0.95).opacity(0.85),
+                       Color(red: 0.93, green: 0.94, blue: 1.0).opacity(0.85)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
