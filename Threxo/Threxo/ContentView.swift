@@ -8,6 +8,7 @@ struct ContentView: View {
     /// swift-plugin-server 会被沙箱拦截，这里绕开它。
     @StateObject private var drop = DropState()
     @StateObject private var wizard = CompressWizardState()
+    @StateObject private var browser = BrowserState()
     @ObservedObject private var options = CompressionOptions.shared
 
     var body: some View {
@@ -50,6 +51,9 @@ struct ContentView: View {
                     .padding(6)
                     .allowsHitTesting(false)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .threxoFocusSearch)) { _ in
+            browser.focusSearch()
         }
         .sheet(item: $model.passwordPrompt) { prompt in
             PasswordSheet(
@@ -193,46 +197,10 @@ struct ContentView: View {
 
     @ViewBuilder
     private var content: some View {
-        if model.isBusy && model.entries.isEmpty {
-            centered {
-                ProgressView()
-                Text(model.statusText).font(.caption).foregroundStyle(.secondary)
-            }
-        } else if model.entries.isEmpty {
+        if model.archiveURL == nil {
             emptyState
-        } else if !model.treeNodes.isEmpty {
-            List(model.treeNodes, children: \.children, selection: $model.selection) { node in
-                row(icon: node.isDirectory ? "folder" : "doc",
-                    tint: node.isDirectory ? Color.accentColor : Color.secondary,
-                    name: node.name,
-                    detail: node.isDirectory ? nil : ByteFormatter.string(node.size),
-                    highlighted: drop.rowTarget == node.path)
-                    .modifier(ArchiveRowActions(
-                        model: model,
-                        drop: drop,
-                        path: node.path,
-                        name: node.name,
-                        isDirectory: node.isDirectory
-                    ))
-            }
-            .listStyle(.inset)
         } else {
-            // 超大归档（> 2 万条）回退到扁平列表，避免建树卡顿。
-            List(model.entries, id: \.path, selection: $model.selection) { entry in
-                row(icon: entry.isDirectory ? "folder" : "doc",
-                    tint: entry.isDirectory ? Color.accentColor : Color.secondary,
-                    name: entry.path,
-                    detail: entry.isDirectory ? nil : ByteFormatter.string(entry.size),
-                    highlighted: drop.rowTarget == entry.path)
-                    .modifier(ArchiveRowActions(
-                        model: model,
-                        drop: drop,
-                        path: entry.path,
-                        name: (entry.path as NSString).lastPathComponent,
-                        isDirectory: entry.isDirectory
-                    ))
-            }
-            .listStyle(.inset)
+            ArchiveBrowserView(model: model, browser: browser, drop: drop)
         }
     }
 
@@ -249,28 +217,6 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
         .background(Color.primary.opacity(0.03))
-    }
-
-    private func row(icon: String, tint: Color, name: String, detail: String?, highlighted: Bool = false) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .foregroundStyle(tint)
-            Text(name)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer()
-            if let detail {
-                Text(detail)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-        }
-        .padding(.vertical, 2)
-        .padding(.horizontal, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 5)
-                .fill(highlighted ? Color.accentColor.opacity(0.18) : Color.clear)
-        )
     }
 
     private var emptyState: some View {
@@ -371,52 +317,6 @@ struct ContentView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
-    }
-}
-
-/// 列表行上的两个动作：
-///   · 拖出去 → 落到访达时解压到那个位置（`NSItemProvider` 文件承诺）；
-///   · 把文件拖到这一行 → 加进归档的这个层级（文件夹行进它自己，文件行进它所在那层）。
-private struct ArchiveRowActions: ViewModifier {
-    let model: AppModel
-    let drop: DropState
-    let path: String
-    let name: String
-    let isDirectory: Bool
-
-    func body(content: Content) -> some View {
-        content
-            .contentShape(Rectangle())
-            .onDrag {
-                model.dragProvider(path: path, name: name, isDirectory: isDirectory)
-            }
-            .dropDestination(for: URL.self) { urls, _ in
-                model.addDroppedFiles(urls, toFolder: targetFolder)
-                return true
-            } isTargeted: { inside in
-                if inside {
-                    drop.rowTarget = path
-                } else if drop.rowTarget == path {
-                    drop.rowTarget = nil
-                }
-            }
-            .contextMenu {
-                Button("解压到…") {
-                    model.extractPaths(model.targets(for: path), choosingDestination: true)
-                }
-                Button("解压到压缩包所在文件夹") {
-                    model.extractPaths(model.targets(for: path), choosingDestination: false)
-                }
-                Divider()
-                Button("解压到同级文件夹") {
-                    model.extractPathsToNewFolder(model.targets(for: path))
-                }
-            }
-    }
-
-    private var targetFolder: String {
-        if isDirectory { return AppModel.normalizeEntryPath(path) }
-        return AppModel.normalizeEntryPath((path as NSString).deletingLastPathComponent)
     }
 }
 

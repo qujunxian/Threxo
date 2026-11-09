@@ -24,6 +24,11 @@ func appDbg(_ message: @autoclosure () -> String) {
 
 // MARK: - 应用入口
 
+extension Notification.Name {
+    /// 菜单「查找 ⌘F」→ 主窗口搜索框聚焦。
+    static let threxoFocusSearch = Notification.Name("threxo.focusSearch")
+}
+
 /// 主窗口刻意不写成 SwiftUI 的 `WindowGroup`：`WindowGroup` 在 App 启动时
 /// 必然建窗，而访达右键走的是**静默任务**——不该为了解一个压缩包把主界面弹出来。
 /// 改成「零窗口启动 + 按需创建 NSWindow」之后：
@@ -92,6 +97,19 @@ func appDbg(_ message: @autoclosure () -> String) {
                     }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                     .disabled(model.isBusy || model.entries.isEmpty)
+
+                    Divider()
+
+                    Button("查找") {
+                        MainWindowController.shared.show()
+                        // 搜索框在 ContentView 里，用通知让它把自己切成第一响应者，
+                        // 免得为了一个快捷键把 BrowserState 提升成全局单例。
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            NotificationCenter.default.post(name: .threxoFocusSearch, object: nil)
+                        }
+                    }
+                    .keyboardShortcut("f")
+                    .disabled(model.archiveURL == nil)
                 }
             }
     }
@@ -132,6 +150,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 仅调试：把压缩向导离屏渲染成 PNG 后退出，便于无界面环境下核对布局。
         if let path = ProcessInfo.processInfo.environment["THREXO_RENDER_WIZARD"] {
             renderWizardPreview(to: path)
+            NSApp.terminate(nil)
+            return
+        }
+
+        // 仅调试：打开一个归档，把主窗口（含列表 / 图标 / 分栏 / 详情）快照成 PNG。
+        // 锁屏环境下 screencapture 只能拍到锁屏界面，这条路是唯一能看到真实控件布局的方式。
+        if let out = ProcessInfo.processInfo.environment["THREXO_RENDER_BROWSER"] {
+            let env = ProcessInfo.processInfo.environment
+            let archive = env["THREXO_RENDER_ARCHIVE"].map { URL(fileURLWithPath: $0) }
+            let mode = env["THREXO_RENDER_MODE"].flatMap(SettingsStore.BrowseMode.init(rawValue:))
+            renderBrowserPreview(archive: archive, mode: mode, to: out)
             NSApp.terminate(nil)
             return
         }
@@ -311,8 +340,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-// MARK: - 主窗口
+// MARK: - 离屏快照（仅调试）
 
+#if DEBUG
+/// 把 SwiftUI 视图挂到一个离屏窗口里，再把它画进位图。
+/// `ImageRenderer` 不渲染 `List` / `ScrollView` 的内容，只能走 AppKit 的 `cacheDisplay`。
+@MainActor
+func snapshotView<V: View>(_ view: V, size: CGSize, to path: String) {
+    let hosting = NSHostingView(rootView: view)
+    hosting.frame = NSRect(origin: .zero, size: size)
+
+    let window = NSWindow(
+        contentRect: hosting.frame,
+        styleMask: [.borderless],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentView = hosting
+    window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+    window.orderFrontRegardless()
+
+    hosting.layoutSubtreeIfNeeded()
+    // 给 NSTableView 一点时间装载行、异步解压缩略图。
+    let deadline = Date().addingTimeInterval(1.2)
+    while Date() < deadline {
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+    }
+    hosting.layoutSubtreeIfNeeded()
+    hosting.displayIfNeeded()
+
+    if let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) {
+        hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        if let data = rep.representation(using: .png, properties: [:]) {
+            try? data.write(to: URL(fileURLWithPath: path))
+        }
+    }
+    window.orderOut(nil)
+}
+
+@MainActor
+func renderBrowserPreview(archive: URL?, mode: SettingsStore.BrowseMode?, to path: String) {
+    let model = AppModel.shared
+    if let archive { model.debugLoadAndWait(archive) }
+    if let mode { SettingsStore.shared.browseMode = mode }
+    let env = ProcessInfo.processInfo.environment
+    if let query = env["THREXO_RENDER_SEARCH"] { model.searchText = query }
+    if let raw = env["THREXO_RENDER_SORT"], let key = ArchiveSortKey(rawValue: raw) { model.sortKey = key }
+    if let selected = env["THREXO_RENDER_SELECT"] { model.selection = [selected] }
+    let view = ContentView()
+        .environmentObject(model)
+        .frame(width: 1060, height: 660)
+    snapshotView(view, size: CGSize(width: 1060, height: 660), to: path)
+}
+#endif
+
+// MARK: - 主窗口
 /// 按需创建的单窗口控制器。窗口只在这里出现，`App` 的 Scene 里没有窗口。
 final class MainWindowController: NSObject, NSWindowDelegate {
     static let shared = MainWindowController()
