@@ -110,38 +110,6 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Format picker
-
-    /// 顶栏右侧的格式选择器：改的是「压缩成什么」。
-    private var formatMenu: some View {
-        Menu {
-            Picker(L("压缩格式"), selection: $options.format) {
-                ForEach(ArchiveFormat.allCases) { format in
-                    Text(format.displayName).tag(format)
-                }
-            }
-            .pickerStyle(.inline)
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: options.format.symbolName)
-                    .foregroundStyle(.orange)
-                Text(options.format.displayName)
-                    .font(.system(size: 13, weight: .semibold))
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(Capsule().fill(Color(nsColor: .controlBackgroundColor)))
-            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.10)))
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help(L("选择压缩格式"))
-    }
-
     // MARK: - Header
 
     private var header: some View {
@@ -161,17 +129,6 @@ struct ContentView: View {
                     .truncationMode(.middle)
             }
             Spacer()
-
-            formatMenu
-
-            Button {
-                SettingsWindowController.shared.show()
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 14))
-            }
-            .buttonStyle(.borderless)
-            .help(L("设置"))
 
             Button("压缩…") {
                 wizard.sources = nil
