@@ -972,9 +972,13 @@ final class AppModel: ObservableObject {
                 return
             }
             let parsed = ArchiveLister.parse(result.output)
-            self.entries = parsed
-            self.treeNodes = ArchiveTree.build(parsed)
-            let available = Set(parsed.map { Self.normalizeEntryPath($0.path) })
+            // 走和 load() 同一条管线：原始条目是 allEntries，列表显示的是 rebuildVisible()
+            // 过滤排序后的结果。直接写 entries 会让搜索、排序、辅助项开关读到旧数据。
+            self.allEntries = parsed
+            self.archiveEncrypted = result.output.contains("Encrypted = +")
+            self.baseDirty = true
+            self.rebuildVisible()
+            let available = Set(self.entries.map { Self.normalizeEntryPath($0.path) })
             let wanted = paths.map(Self.normalizeEntryPath).filter(available.contains)
             if !wanted.isEmpty {
                 self.selection = Set(wanted)
@@ -995,6 +999,151 @@ final class AppModel: ObservableObject {
                 appDbg("reveal folders=\(folders.sorted()) entries=\(wanted)")
             }
         }
+    }
+
+    // MARK: - 包内编辑（T-09）
+
+    /// 当前归档能不能改条目。rar、单流压缩器、分卷包一律不行。
+    var canEditCurrentArchive: Bool {
+        guard let archive = archiveURL else { return false }
+        return ArchiveMutator.canEdit(archive)
+    }
+
+    private var notEditableMessage: String {
+        L("这个归档不能直接改条目。分卷包和 rar 请解压后重新打包。")
+    }
+
+    /// 删除选中的条目。选中目录时 7zz 的 `-r` 会连带删掉里面所有东西。
+    func deleteEntries(_ paths: [String]) {
+        guard canStartTask(), let archive = archiveURL else { NSSound.beep(); return }
+        guard canEditCurrentArchive else { errorMessage = notEditableMessage; return }
+        let items = paths.map(Self.normalizeEntryPath).filter { !$0.isEmpty }
+        guard !items.isEmpty else { return }
+        guard confirmDelete(items) else { return }
+
+        let base = ["d", archive.path, "-y", "-r", "-bsp1", "-bb1"]
+        mutateArchive(base: base, items: items, status: L("正在删除条目…"), selectAfter: []) {
+            self.statusText = String(format: L("已删除 %d 项"), items.count)
+            self.selection = []
+        }
+    }
+
+    /// 重命名单个条目。7zz 的 `rn` 会自动把目录下的子项路径一起改掉（实测）。
+    func renameEntry(_ path: String) {
+        guard canStartTask(), let archive = archiveURL else { NSSound.beep(); return }
+        guard canEditCurrentArchive else { errorMessage = notEditableMessage; return }
+        let normalized = Self.normalizeEntryPath(path)
+        guard !normalized.isEmpty else { return }
+
+        let parent = (normalized as NSString).deletingLastPathComponent
+        let original = (normalized as NSString).lastPathComponent
+        guard let newName = askNewName(original: original, siblings: childNames(in: parent)) else { return }
+        let newPath = parent.isEmpty ? newName : parent + "/" + newName
+
+        let base = ["rn", archive.path, "-y", "-bsp1", "-bb1"]
+        mutateArchive(
+            base: base,
+            items: [normalized, newPath],
+            status: L("正在重命名…"),
+            selectAfter: [newPath]
+        ) {
+            self.statusText = String(format: L("已重命名为「%@」"), newName)
+        }
+    }
+
+    /// 删除 / 重命名共用的执行壳：先备份原包，密码按需补上，失败整份还原。
+    private func mutateArchive(
+        base: [String],
+        items: [String],
+        status: String,
+        selectAfter: [String],
+        onSuccess: @escaping () -> Void
+    ) {
+        guard let archive = archiveURL else { return }
+        let backup: URL
+        do {
+            backup = try ArchiveMutator.backup(archive)
+        } catch {
+            errorMessage = String(format: L("备份原包失败，已停止：%@"), error.localizedDescription)
+            return
+        }
+
+        runTask(status: status) { [self] in
+            var password = archivePassword
+            if archiveEncrypted, password == nil {
+                guard let entered = await askPassword(isRetry: false) else { return 255 }
+                password = entered
+                archivePassword = entered
+            }
+            var args = base
+            if let password, !password.isEmpty { args.append("-p\(password)") }
+            args.append(contentsOf: items)
+            return await runWithProgress(args, progressRange: 0...100)
+        } completion: { [self] code in
+            if code == 0 {
+                ArchiveMutator.discard(backup)
+                progress = 100
+                currentItem = nil
+                onSuccess()
+                reloadEntries(selecting: selectAfter)
+            } else if code == 255 {
+                ArchiveMutator.discard(backup)
+                statusText = L("已取消")
+            } else {
+                let restored = ArchiveMutator.restore(archive, from: backup)
+                statusText = restored ? L("修改失败，原包已还原") : L("修改失败，原包可能已损坏")
+                errorMessage = restored
+                    ? Self.describe(exitCode: code)
+                    : String(format: L("%@。备份还在 %@"), Self.describe(exitCode: code), backup.path)
+            }
+        }
+    }
+
+    private func confirmDelete(_ items: [String]) -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = items.count == 1
+            ? String(format: L("从归档里删除「%@」？"), (items[0] as NSString).lastPathComponent)
+            : String(format: L("从归档里删除这 %d 项？"), items.count)
+        alert.informativeText = L("会直接改写压缩包，删了没法撤销。")
+        alert.addButton(withTitle: L("取消"))
+        alert.addButton(withTitle: L("删除"))
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
+    /// 输入框校验不通过就再来一轮，最多四次，不用关掉窗口重新点一次菜单。
+    private func askNewName(original: String, siblings: Set<String>) -> String? {
+        NSApp.activate(ignoringOtherApps: true)
+        var hint = String(format: L("给「%@」换个名字"), original)
+        for _ in 0..<4 {
+            let alert = NSAlert()
+            alert.alertStyle = .informational
+            alert.messageText = L("重命名")
+            alert.informativeText = hint
+            alert.addButton(withTitle: L("重命名"))
+            alert.addButton(withTitle: L("取消"))
+            let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+            field.stringValue = original
+            field.bezelStyle = .roundedBezel
+            alert.accessoryView = field
+            alert.window.initialFirstResponder = field
+            alert.window.level = .floating
+            // 默认只选中主干、不选中扩展名，跟访达一致。
+            let ext = (original as NSString).pathExtension
+            let selectLength = ext.isEmpty ? (original as NSString).length
+                : (original as NSString).length - ext.count - 1
+            field.currentEditor()?.selectedRange = NSRange(location: 0, length: max(0, selectLength))
+
+            guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+            let typed = field.stringValue
+            if let reason = ArchiveMutator.invalidReason(for: typed, siblings: siblings, original: original) {
+                hint = reason
+                continue
+            }
+            return typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
     }
 
     // MARK: - 拖出到访达（解压到拖到的位置）
@@ -2071,6 +2220,9 @@ final class AppModel: ObservableObject {
             isBusy = true
             statusText = L("模拟卡死")
             appDbg("debug stall injected")
+        case "debugEdit":
+            // 仅调试：绕过确认弹窗，验证「备份 → 7zz d/rn → 回读」整条链路。
+            debugEdit(url)
         case "settings":
             // 仅调试：`threxo://settings?page=extract` 直接落到某一页，方便逐页核对布局。
             let page = URLComponents(url: url, resolvingAgainstBaseURL: false)?
@@ -2087,6 +2239,47 @@ final class AppModel: ObservableObject {
     ///
     /// 拖拽本身没法脚本化（要真按鼠标），所以留这个入口跑通
     /// 「先读归档 → 再追加 → 回读」这条链路，Release 里不存在。
+    /// 仅调试：`threxo://debugEdit?archive=…&op=delete|rename&path=…&name=…`
+    private func debugEdit(_ url: URL) {
+        guard let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+              let archivePath = items.first(where: { $0.name == "archive" })?.value,
+              let op = items.first(where: { $0.name == "op" })?.value,
+              let path = items.first(where: { $0.name == "path" })?.value else { return }
+        let archive = URL(fileURLWithPath: archivePath)
+        let name = items.first(where: { $0.name == "name" })?.value
+        // fail=1 时故意塞一个 7zz 不认识的开关，用来验证「失败整份还原」。
+        let fail = items.contains { $0.name == "fail" && $0.value == "1" }
+        let confirmSwitch = fail ? "-badswitch" : "-y"
+
+        Task { @MainActor in
+            let result = await self.list(archive, password: nil)
+            guard result.code == 0 else {
+                appDbg("debugEdit 读取失败 code=\(result.code)")
+                return
+            }
+            self.archiveURL = archive
+            self.allEntries = ArchiveLister.parse(result.output)
+            self.baseDirty = true
+            self.rebuildVisible()
+            appDbg("debugEdit op=\(op) path=\(path) entries=\(self.allEntries.count)")
+
+            if op == "delete" {
+                let base = ["d", archive.path, confirmSwitch, "-r", "-bsp1", "-bb1"]
+                self.mutateArchive(base: base, items: [path], status: "debug delete", selectAfter: []) {
+                    appDbg("debugEdit delete done")
+                }
+            } else if op == "rename", let name {
+                let parent = (path as NSString).deletingLastPathComponent
+                let newPath = parent.isEmpty ? name : parent + "/" + name
+                let base = ["rn", archive.path, confirmSwitch, "-bsp1", "-bb1"]
+                self.mutateArchive(base: base, items: [path, newPath], status: "debug rename",
+                                   selectAfter: [newPath]) {
+                    appDbg("debugEdit rename done")
+                }
+            }
+        }
+    }
+
     private func debugAdd(_ url: URL) {
         guard let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
               let archivePath = items.first(where: { $0.name == "archive" })?.value else { return }

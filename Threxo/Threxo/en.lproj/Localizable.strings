@@ -447,3 +447,27 @@
 /* ===== 任务卡死自愈（2026-11-09 缺陷修复）===== */
 "上一个任务没有正常结束，已复位" = "The previous task didn't finish — it has been reset";
 "复位卡住的任务" = "Reset Stuck Task";
+
+/* ===== 包内编辑（v1.2 T-09）===== */
+"这个归档不能直接改条目。分卷包和 rar 请解压后重新打包。" = "This archive can't be edited in place. Extract split volumes and RAR files, then repack them.";
+"正在删除条目…" = "Deleting items…";
+"已删除 %d 项" = "Deleted %d items";
+"正在重命名…" = "Renaming…";
+"已重命名为「%@」" = "Renamed to “%@”";
+"备份原包失败，已停止：%@" = "Couldn't back up the archive, stopped: %@";
+"修改失败，原包已还原" = "Edit failed — the original archive has been restored";
+"修改失败，原包可能已损坏" = "Edit failed — the original archive may be damaged";
+"%@。备份还在 %@" = "%@ The backup is still at %@";
+"从归档里删除「%@」？" = "Delete “%@” from the archive?";
+"从归档里删除这 %d 项？" = "Delete these %d items from the archive?";
+"会直接改写压缩包，删了没法撤销。" = "This rewrites the archive and can't be undone.";
+"删除" = "Delete";
+"重命名" = "Rename";
+"重命名…" = "Rename…";
+"给「%@」换个名字" = "New name for “%@”";
+"从归档中删除" = "Delete from Archive";
+"名字不能为空" = "The name can't be empty";
+"这个名字不能用" = "That name can't be used";
+"名字里不能带有 / \\ : * ? \" < > | 这些字符" = "The name can't contain / \\ : * ? \" < > |";
+"名字里不能带有控制字符" = "The name can't contain control characters";
+"同一层级已经有「%@」" = "“%@” already exists at this level";

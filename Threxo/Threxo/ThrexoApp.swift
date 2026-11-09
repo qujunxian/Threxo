@@ -103,6 +103,18 @@ extension Notification.Name {
 
                     Divider()
 
+                    Button("重命名…") {
+                        if let path = model.selection.first { model.renameEntry(path) }
+                    }
+                    .keyboardShortcut("r", modifiers: [.command])
+                    .disabled(model.selection.count != 1 || !model.canEditCurrentArchive)
+
+                    Button("从归档中删除") { model.deleteEntries(Array(model.selection)) }
+                    .keyboardShortcut(.delete, modifiers: [.command])
+                    .disabled(!model.hasSelection || !model.canEditCurrentArchive)
+
+                    Divider()
+
                     Button("查找") {
                         MainWindowController.shared.show()
                         // 搜索框在 ContentView 里，用通知让它把自己切成第一响应者，

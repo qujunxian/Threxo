@@ -566,6 +566,11 @@ struct ArchiveIconView: View {
                 Divider()
                 Button("进入文件夹") { open(node) }
             }
+            Divider()
+            Button("重命名…") { model.renameEntry(node.path) }
+                .disabled(!model.canEditCurrentArchive)
+            Button("从归档中删除") { model.deleteEntries(model.targets(for: node.path)) }
+                .disabled(!model.canEditCurrentArchive)
         }
         .help(node.name)
     }
@@ -787,6 +792,14 @@ struct DetailPanelView: View {
                 }
                 .controlSize(.small)
             }
+            HStack(spacing: 8) {
+                Button("重命名…") { model.renameEntry(entry.path) }
+                    .controlSize(.small)
+                    .disabled(!model.canEditCurrentArchive)
+                Button("从归档中删除") { model.deleteEntries(model.targets(for: entry.path)) }
+                    .controlSize(.small)
+                    .disabled(!model.canEditCurrentArchive)
+            }
         }
     }
 }
@@ -917,6 +930,11 @@ struct ArchiveRowActions: ViewModifier {
                 Button("解压到同级文件夹") {
                     model.extractPathsToNewFolder(model.targets(for: path))
                 }
+                Divider()
+                Button("重命名…") { model.renameEntry(path) }
+                    .disabled(!model.canEditCurrentArchive)
+                Button("从归档中删除") { model.deleteEntries(model.targets(for: path)) }
+                    .disabled(!model.canEditCurrentArchive)
             }
     }
 
