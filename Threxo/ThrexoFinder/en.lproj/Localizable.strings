@@ -10,3 +10,6 @@
 "用千梭解压 %d 个归档" = "Extract %d Archives with Threxo";
 "用千梭压缩" = "Compress with Threxo";
 "用千梭压缩 %d 项" = "Compress %d Items with Threxo";
+"用千梭解压到…" = "Extract with Threxo to…";
+"用千梭压缩为…" = "Compress with Threxo…";
+"用千梭压缩「%@」" = "Compress “%@” with Threxo";

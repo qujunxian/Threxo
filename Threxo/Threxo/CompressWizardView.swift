@@ -8,6 +8,9 @@ final class CompressWizardState: ObservableObject {
     @Published var isPresented: Bool
     /// 点「选择内容并压缩…」后先把面板收掉，`onDismiss` 里再走选文件流程。
     @Published var pendingCompress = false
+    /// 访达右键「压缩为…」已经定好的源。非 nil 时向导确认后直接进保存面板，
+    /// 不再让用户选一遍文件（`nil` 表示从工具栏进来的，需要先选内容）。
+    @Published var sources: [URL]?
 
     init() {
         #if DEBUG
@@ -25,6 +28,8 @@ final class CompressWizardState: ObservableObject {
 /// 下面概览里立刻显示最终会下发的 7zz 参数，用户随时能改回自定义。
 struct CompressWizardView: View {
     @ObservedObject var options: CompressionOptions
+    /// 源是否已经由调用方给定（访达右键「压缩为…」）。只影响底部按钮文案。
+    var hasSources: Bool = false
     let onCancel: () -> Void
     let onConfirm: () -> Void
 
@@ -373,14 +378,14 @@ struct CompressWizardView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.red)
             } else {
-                Text(L("下一步选要压缩的文件，再选保存位置。"))
+                Text(hasSources ? L("源已选定，下一步选保存位置。") : L("下一步选要压缩的文件，再选保存位置。"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
             Button(L("取消")) { onCancel() }
                 .keyboardShortcut(.cancelAction)
-            Button(L("选择内容并压缩…")) { onConfirm() }
+            Button(hasSources ? L("选择保存位置…") : L("选择内容并压缩…")) { onConfirm() }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
                 .disabled(options.passwordValidationMessage != nil)

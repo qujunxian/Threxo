@@ -55,6 +55,12 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .threxoFocusSearch)) { _ in
             browser.focusSearch()
         }
+        .onChange(of: model.compressDialogSources) { _, urls in
+            guard let urls, !urls.isEmpty else { return }
+            model.compressDialogSources = nil
+            wizard.sources = urls
+            wizard.isPresented = true
+        }
         .sheet(item: $model.passwordPrompt) { prompt in
             PasswordSheet(
                 prompt: prompt,
@@ -65,7 +71,11 @@ struct ContentView: View {
         .sheet(isPresented: $wizard.isPresented, onDismiss: startPendingCompress) {
             CompressWizardView(
                 options: options,
-                onCancel: { wizard.isPresented = false },
+                hasSources: !(wizard.sources?.isEmpty ?? true),
+                onCancel: {
+                    wizard.sources = nil
+                    wizard.isPresented = false
+                },
                 onConfirm: {
                     // 面板收掉之后再弹系统面板，否则两个 modal 叠在一起会卡住。
                     wizard.pendingCompress = true
@@ -76,10 +86,20 @@ struct ContentView: View {
     }
 
     /// 向导确认后接着走「选源 → 选保存位置」两步，用的仍是 `AppModel.compress()`。
+    /// 源已经由访达右键给定的时候跳过第一步。
     private func startPendingCompress() {
-        guard wizard.pendingCompress else { return }
+        guard wizard.pendingCompress else {
+            wizard.sources = nil
+            return
+        }
         wizard.pendingCompress = false
-        model.compress()
+        let sources = wizard.sources
+        wizard.sources = nil
+        if let sources, !sources.isEmpty {
+            model.compress(sources: sources)
+        } else {
+            model.compress()
+        }
     }
 
     // MARK: - Format picker
@@ -136,7 +156,10 @@ struct ContentView: View {
 
             formatMenu
 
-            Button("压缩…") { wizard.isPresented = true }
+            Button("压缩…") {
+                wizard.sources = nil
+                wizard.isPresented = true
+            }
                 .disabled(model.isBusy)
                 .help(L("打开创建压缩包向导"))
             Button("打开归档…") { model.openArchive() }

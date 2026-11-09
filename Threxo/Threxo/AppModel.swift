@@ -84,6 +84,27 @@ final class AppModel: ObservableObject {
     /// 解压加密归档时的密码框；非 nil 表示正在等用户输入。
     @Published var passwordPrompt: PasswordPrompt?
 
+    /// 访达右键「压缩为…」传进来的源。非 nil 时界面挂出压缩向导，
+    /// 向导确认后直接进保存面板，不再让用户选一遍文件。
+    @Published var compressDialogSources: [URL]?
+
+    /// 拖入文件（或追加）成功后要展开并选中的条目，供列表自动定位。
+    @Published var revealRequest: RevealRequest?
+
+    struct RevealRequest: Equatable {
+        let id = UUID()
+        /// 需要展开的目录（含各级父目录），按由浅到深排列。
+        let folders: [String]
+        /// 要选中的条目路径。
+        let entries: [String]
+    }
+
+    /// 攒批用的缓冲区：访达逐个投递时，400ms 内的请求算同一批。
+    private var pendingSilentCompress: [URL] = []
+    private var silentCompressToken = 0
+    /// 合并窗口。太短则冷启动时后续事件还没到就提前压了，太长用户要等。
+    static let silentCompressWindow: TimeInterval = 0.4
+
     /// 本次归档已确认可用的密码，只存在内存里，切换归档即清空。
     private var archivePassword: String?
     /// 归档是否含加密条目（来自 `l -slt` 的 `Encrypted = +`）。详情面板要用，所以要能观察。
@@ -109,12 +130,27 @@ final class AppModel: ObservableObject {
     /// 解压时发现的非致命路径异常（`../` 被落平），成功后拼进结果提示。
     private var pendingSafetyNote: String?
 
+    /// 往提示里追加一句（多条提示用「；」隔开）。
+    private func appendSafetyNote(_ note: String) {
+        if let existing = pendingSafetyNote, !existing.isEmpty {
+            pendingSafetyNote = existing + "；" + note
+        } else {
+            pendingSafetyNote = note
+        }
+    }
+
     /// 安全检查拦下解压时的详细说明。写成属性是因为静默链路的通知
     /// 由任务收尾统一发一次，中途再发一条就成了重复打扰。
     private var pendingSafetyFailure: String?
 
     /// 自定义退出码：路径安全检查未通过。
     static let exitUnsafePath: Int32 = 254
+    /// 自定义退出码：目标卷空间不足（静默链路）。
+    static let exitInsufficientSpace: Int32 = 253
+
+    /// 本次解压实际落到的目录。用户在空间预检里点了「换位置」之后，
+    /// 目标就不再是调用方传进来的那个，收尾提示与「在访达中显示」都得跟着改。
+    private var lastExtractDestination: URL?
 
     struct PasswordPrompt: Identifiable {
         let id = UUID()
@@ -545,17 +581,19 @@ final class AppModel: ObservableObject {
         runTask(status: status) { [self] in
             await extractBlocking(archive: archive, to: dest, items: items, renameExisting: rename)
         } completion: { code in
+            // 空间预检里可能点了「换位置」，实际落点以链路里记下的为准。
+            let landed = self.lastExtractDestination ?? dest
             if code == 0 {
                 self.progress = 100  // 7zz 不保证打到 100%，成功后补齐。
                 self.currentItem = nil
-                var text = String(format: L("解压完成 → %@"), dest.path)
+                var text = String(format: L("解压完成 → %@"), landed.path)
                 if let note = self.pendingSafetyNote {
                     text += "（\(note)）"
                     self.pendingSafetyNote = nil
                 }
                 self.statusText = text
                 if reveal, SettingsStore.shared.revealAfterExtract {
-                    NSWorkspace.shared.activateFileViewerSelecting([dest])
+                    NSWorkspace.shared.activateFileViewerSelecting([landed])
                 }
                 self.applyArchiveHandling(archive: archive)
                 if SettingsStore.shared.closeAfterExtract, self.archiveURL == archive {
@@ -660,11 +698,16 @@ final class AppModel: ObservableObject {
 
     /// 访达右键：逐个解压到**压缩包所在文件夹**（右键时的那个「当前目录」）。
     /// 不建窗口、不弹位置选择；已有同名文件由 `-aou` 自动改名，绝不静默覆盖。
-    func extractAutomatically(_ urls: [URL]) {
+    /// - Parameter destination: 非 nil 时全部解到这里（右键「解压到指定目录…」用）。
+    func extractAutomatically(_ urls: [URL], to destination: URL? = nil) {
         guard !urls.isEmpty else { return }
         guard !isBusy else { NSSound.beep(); return }
 
         let archives = urls
+        if let destination {
+            try? FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+            SettingsStore.shared.lastExtractDirectory = destination
+        }
         // 静默任务和「当前打开的归档」无关，清掉上一份归档的密码状态，
         // 否则会给没加密的包白弹一次密码框。
         archivePassword = nil
@@ -680,7 +723,7 @@ final class AppModel: ObservableObject {
                         : L("正在解压…")
                 }
                 // 当前目录 = 压缩包所在目录：内容直接铺在这里，不再多套一层同名文件夹。
-                let dest = archive.deletingLastPathComponent()
+                let dest = destination ?? archive.deletingLastPathComponent()
                 lastCode = await extractBlocking(
                     archive: archive,
                     to: dest,
@@ -697,7 +740,7 @@ final class AppModel: ObservableObject {
             if code == 0 {
                 self.progress = 100
                 self.currentItem = nil
-                let folder = archives[0].deletingLastPathComponent()
+                let folder = destination ?? archives[0].deletingLastPathComponent()
                 self.statusText = archives.count > 1
                     ? String(format: L("已解压 %d 个归档到当前文件夹"), archives.count)
                     : L("解压完成，文件已放到当前文件夹")
@@ -732,6 +775,34 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+    }
+
+    /// 访达右键「解压到指定目录…」：先挑目录，挑完仍走静默链路（不建主窗口）。
+    /// 用户取消时，如果这个进程是专为这次右键拉起来的，就退出，不留一个空壳。
+    func chooseDestinationAndExtract(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        NSApp.activate(ignoringOtherApps: true)
+
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = NSLocalizedString("panel.extractTo.message", comment: "选择解压目标文件夹的提示语")
+        panel.prompt = NSLocalizedString("panel.extractTo.prompt", comment: "解压目标面板的确认按钮")
+        panel.directoryURL = SettingsStore.shared.lastExtractDirectory
+            ?? urls[0].deletingLastPathComponent()
+
+        guard panel.runModal() == .OK, let dest = panel.url else {
+            MainWindowController.shared.retractIfEmpty()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                if !MainWindowController.shared.hasShown {
+                    NSApp.terminate(nil)
+                }
+            }
+            return
+        }
+        extractAutomatically(urls, to: dest)
     }
 
     // MARK: - 追加文件到归档（把访达里的文件拖进来）
@@ -883,7 +954,24 @@ final class AppModel: ObservableObject {
             self.treeNodes = ArchiveTree.build(parsed)
             let available = Set(parsed.map { Self.normalizeEntryPath($0.path) })
             let wanted = paths.map(Self.normalizeEntryPath).filter(available.contains)
-            if !wanted.isEmpty { self.selection = Set(wanted) }
+            if !wanted.isEmpty {
+                self.selection = Set(wanted)
+                // 拖进的文件夹可能是折叠的：把各级父目录一起交给列表展开，
+                // 否则「已添加」的提示下面看不见任何新条目（T-08）。
+                var folders: Set<String> = []
+                for path in wanted {
+                    var parent = (path as NSString).deletingLastPathComponent
+                    while !parent.isEmpty {
+                        folders.insert(parent)
+                        parent = (parent as NSString).deletingLastPathComponent
+                    }
+                }
+                self.revealRequest = RevealRequest(
+                    folders: folders.sorted { $0.count < $1.count },
+                    entries: wanted
+                )
+                appDbg("reveal folders=\(folders.sorted()) entries=\(wanted)")
+            }
         }
     }
 
@@ -911,6 +999,43 @@ final class AppModel: ObservableObject {
         )
     }
 
+    /// 多选拖出时，把选中的条目摊成拖拽项。
+    /// 目录即使没有显式条目（只有子文件）也能认出来，否则拖文件夹会掉项。
+    func dragItems(for paths: [String]) -> [MultiDrag.Item] {
+        let all = Dictionary(
+            entries.map { (Self.normalizeEntryPath($0.path), $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return paths.compactMap { raw in
+            let path = Self.normalizeEntryPath(raw)
+            if let entry = all[path] {
+                return MultiDrag.Item(
+                    path: path,
+                    name: entry.displayName,
+                    isDirectory: entry.isDirectory
+                )
+            }
+            let prefix = path + "/"
+            guard entries.contains(where: { Self.normalizeEntryPath($0.path).hasPrefix(prefix) }) else {
+                return nil
+            }
+            return MultiDrag.Item(
+                path: path,
+                name: (path as NSString).lastPathComponent,
+                isDirectory: true
+            )
+        }
+    }
+
+    /// 拖拽开始时把上下文拍下来：之后即使用户切了归档，空中的这一批也不受影响。
+    var dragContext: MultiDrag.Context {
+        MultiDrag.Context(
+            archive: archiveURL,
+            password: archivePassword,
+            executable: runner.executableURL
+        )
+    }
+
     // MARK: - Compress (UI flow)
 
     func compress() {
@@ -928,7 +1053,19 @@ final class AppModel: ObservableObject {
         open.message = NSLocalizedString("panel.compress.select.message", comment: "选择待压缩内容的提示语")
         open.prompt = NSLocalizedString("panel.compress.select.prompt", comment: "选择待压缩内容面板的确认按钮")
         guard open.runModal() == .OK, !open.urls.isEmpty else { return }
-        let sources = open.urls
+        compress(sources: open.urls)
+    }
+
+    /// 源已经定好（访达右键「压缩为…」），只弹保存面板。
+    /// 格式与密码由向导提前选好，这里不能再弹一次选源面板。
+    func compress(sources: [URL]) {
+        guard !sources.isEmpty else { return }
+        guard !isBusy else { NSSound.beep(); return }
+
+        if let mismatch = options.passwordValidationMessage {
+            errorMessage = mismatch
+            return
+        }
 
         let save = NSSavePanel()
         // 默认文件名跟着格式走：选 GZIP 就是 abc.tar.gz，不会出现 a.zip 里装 gzip 的错配。
@@ -966,6 +1103,40 @@ final class AppModel: ObservableObject {
             counter += 1
         }
         compress(sources: urls, to: dest, silent: beginSilentRun())
+    }
+
+    // MARK: 访达多次调用合并（T-06）
+
+    /// 访达在部分场景下会**逐个**投递 `threxo://compress?path=…`（每个选中项一次），
+    /// 直接执行就会生成一串只有一项的包。这里攒 400ms：期间来的请求并进同一批，
+    /// 静默期结束才真正压一次。单个文件也就是多等 0.4 秒，换来多选一定只出一个包。
+    func enqueueSilentCompress(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        for url in urls where !pendingSilentCompress.contains(where: { $0.path == url.path }) {
+            pendingSilentCompress.append(url)
+        }
+        silentCompressToken += 1
+        let token = silentCompressToken
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.silentCompressWindow) { [weak self] in
+            guard let self, self.silentCompressToken == token else { return }
+            let batch = self.pendingSilentCompress
+            self.pendingSilentCompress = []
+            guard !batch.isEmpty else { return }
+            appDbg("compress batch flush \(batch.count)")
+            self.compressAutomatically(batch)
+        }
+    }
+
+    /// 访达右键「压缩为…」：先让用户过一遍向导（格式 / 强度 / 密码），再弹保存面板。
+    /// 窗口要先立起来，否则 sheet 没有宿主。
+    func beginCompressDialog(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        MainWindowController.shared.show()
+        // 等窗口真正上屏再挂 sheet，冷启动时 50ms 不够，实测 150ms 稳。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.compressDialogSources = urls
+        }
     }
 
     private func compress(sources: [URL], to dest: URL, silent: Bool = false) {
@@ -1178,21 +1349,47 @@ final class AppModel: ObservableObject {
     ///   把新解出的文件改名（`a.txt` → `a_1.txt`），不覆盖任何现有文件。
     private func extractBlocking(
         archive: URL,
-        to dest: URL,
+        to destination: URL,
         items: [String],
         renameExisting: Bool = false,
         silent: Bool = false
     ) async -> Int32 {
+        var dest = destination
+        var renameExisting = renameExisting
+        lastExtractDestination = destination
+
         // 已知有加密条目但还没拿到密码：先问，省掉一次必然失败的解压。
         if archiveEncrypted, archivePassword == nil {
             guard let entered = await askPassword(isRetry: false) else { return 255 }
             archivePassword = entered
         }
 
+        // 只列一次目录：路径预检、空间核算、危险类型扫描都吃这一份结果。
+        // 大归档列一遍要几百毫秒，列两遍纯属浪费。
+        let listing = await runSync([
+            "l", "-slt", "-ba", "-p\(archivePassword ?? "")", archive.path,
+        ])
+        // 列不出来（头部加密、损坏、分卷缺失）就不拦，交给 7-Zip 自己报错，免得误伤。
+        let scanned = listing.code == 0 ? ArchiveLister.parse(listing.output) : []
+
         // 路径预检：`/etc/x` 这种条目会被 7-Zip 静默搬到 `<目标>/etc/x`，
         // 用户只会看到凭空多出来的目录，所以先问一句再动手。
-        if let blocked = await screenEntryPaths(archive: archive, items: items, silent: silent) {
+        if let blocked = screenEntryPaths(entries: scanned, archive: archive, items: items, silent: silent) {
             return blocked
+        }
+
+        // 空间与危险类型预检（T-07）。可能把目标换到别处，所以在这里而不是调用方。
+        switch preflight(entries: scanned, archive: archive, items: items, dest: dest, silent: silent) {
+        case .abort(let code):
+            return code
+        case .ok(let resolved):
+            dest = resolved
+            lastExtractDestination = resolved
+            if resolved != destination, !renameExisting {
+                // 目标被换到了别的目录：那里有没有同名文件、要不要覆盖，用户没被问过，
+                // 所以一律改名落地，不在没确认过的地方覆盖任何东西。
+                renameExisting = true
+            }
         }
 
         // 拍个顶层快照，解压后用来算「这次多出了什么」。
@@ -1238,14 +1435,15 @@ final class AppModel: ObservableObject {
 
     /// 解压前的路径预检。
     /// - Returns: 需要中止时返回退出码；`nil` 表示放行。
-    private func screenEntryPaths(archive: URL, items: [String], silent: Bool) async -> Int32? {
-        let listing = await runSync([
-            "l", "-slt", "-ba", "-p\(archivePassword ?? "")", archive.path,
-        ])
-        // 列不出来（头部加密、损坏、分卷缺失）就不拦，交给 7-Zip 自己报错，免得误伤。
-        guard listing.code == 0 else { return nil }
+    private func screenEntryPaths(
+        entries: [ArchiveEntry],
+        archive: URL,
+        items: [String],
+        silent: Bool
+    ) -> Int32? {
+        guard !entries.isEmpty else { return nil }
 
-        let findings = ArchiveSafety.inspect(entries: ArchiveLister.parse(listing.output), items: items)
+        let findings = ArchiveSafety.inspect(entries: entries, items: items)
         guard !findings.isEmpty else { return nil }
 
         let detail = ArchiveSafety.summarize(findings)
@@ -1280,6 +1478,167 @@ final class AppModel: ObservableObject {
         alert.addButton(withTitle: L("取消"))
         alert.addButton(withTitle: L("仍然解压"))
         return alert.runModal() == .alertSecondButtonReturn ? nil : Self.exitUnsafePath
+    }
+
+    // MARK: - 空间预检与危险类型提示（T-07）
+
+    /// 解压前要看两件事：
+    ///   1. 目标卷装不装得下（10GB 的包解到剩 2GB 的盘上，跑到一半才失败最难受）；
+    ///   2. 里面有没有 `.app`/`.pkg`/`.command` 这类「双击就执行」的东西。
+    /// 两条都不阻断，只是先让人知道。静默链路不弹窗，结论写进结果通知。
+    private enum PreflightOutcome {
+        case ok(URL)
+        case abort(Int32)
+    }
+
+    /// 这些后缀解出来后双击就会执行，来源不明时值得提醒一句。
+    private static let executableExtensions: Set<String> = [
+        "app", "pkg", "command", "sh", "terminal", "mpkg", "workflow",
+    ]
+
+    private func preflight(
+        entries: [ArchiveEntry],
+        archive: URL,
+        items: [String],
+        dest: URL,
+        silent: Bool
+    ) -> PreflightOutcome {
+        guard !entries.isEmpty else { return .ok(dest) }
+
+        let wanted = Set(items.map(Self.normalizeEntryPath))
+        var needed: Int64 = 0
+        var executables: [String] = []
+
+        for entry in entries where !entry.isDirectory {
+            let path = Self.normalizeEntryPath(entry.path)
+            if !wanted.isEmpty,
+               !wanted.contains(path),
+               !wanted.contains(where: { path.hasPrefix($0 + "/") }) {
+                continue
+            }
+            needed += entry.size
+            if Self.executableExtensions.contains((path as NSString).pathExtension.lowercased()) {
+                executables.append(path)
+            }
+        }
+
+        let free = Self.freeSpace(at: dest)
+        appDbg("preflight needed=\(needed) free=\(free ?? -1) exe=\(executables.count) dest=\(dest.path)")
+
+        if !executables.isEmpty {
+            if silent {
+                appendSafetyNote(String(
+                    format: L("含 %d 个可执行文件（%@）"),
+                    executables.count,
+                    executables.prefix(3).map { ($0 as NSString).lastPathComponent }.joined(separator: "、")
+                ))
+            } else if !confirmExecutableEntries(executables) {
+                return .abort(255)
+            }
+        }
+
+        guard needed > 0, let free, needed > free else {
+            return .ok(dest)
+        }
+
+        if silent {
+            pendingSafetyFailure = String(
+                format: L("空间不足：解压需要 %@，目标卷可用 %@。"),
+                ByteFormatter.string(needed), ByteFormatter.string(free)
+            )
+            return .abort(Self.exitInsufficientSpace)
+        }
+
+        switch askInsufficientSpace(needed: needed, free: free) {
+        case .proceed:
+            return .ok(dest)
+        case .cancel:
+            return .abort(255)
+        case .elsewhere:
+            guard let chosen = pickExtractDestination(startingAt: dest) else { return .abort(255) }
+            try? FileManager.default.createDirectory(at: chosen, withIntermediateDirectories: true)
+            SettingsStore.shared.lastExtractDirectory = chosen
+            return .ok(chosen)
+        }
+    }
+
+    /// 目标路径所在卷的可用空间。路径还不存在时退到父目录再问。
+    static func freeSpace(at url: URL) -> Int64? {
+        var probe = url
+        if !FileManager.default.fileExists(atPath: url.path) {
+            probe = url.deletingLastPathComponent()
+        }
+        let keys: Set<URLResourceKey> = [
+            .volumeAvailableCapacityForImportantUsageKey,
+            .volumeAvailableCapacityKey,
+        ]
+        guard let values = try? probe.resourceValues(forKeys: keys) else { return nil }
+        // forImportantUsage 会把「可清理的缓存」也算进可用空间，比 volumeAvailableCapacity 更接近
+        // 访达显示的数字，优先用它。但它在某些卷（只读盘、DMG、网络卷）上会返回 0，
+        // 那就退回普通可用空间，别把「未知」当成「一点都没有」。
+        if let bytes = values.volumeAvailableCapacityForImportantUsage, bytes > 0 {
+            return bytes
+        }
+        if let bytes = values.volumeAvailableCapacity { return Int64(bytes) }
+        return nil
+    }
+
+    private enum SpaceChoice {
+        case proceed
+        case elsewhere
+        case cancel
+    }
+
+    private func askInsufficientSpace(needed: Int64, free: Int64) -> SpaceChoice {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = L("目标位置空间不足")
+        alert.informativeText = String(
+            format: L("解压后需要 %@，目标卷可用 %@。可以换个位置，或仍然解压（可能中途失败）。"),
+            ByteFormatter.string(needed), ByteFormatter.string(free)
+        )
+        alert.addButton(withTitle: L("换位置…"))
+        alert.addButton(withTitle: L("仍然解压"))
+        alert.addButton(withTitle: L("取消"))
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .elsewhere
+        case .alertSecondButtonReturn: return .proceed
+        default: return .cancel
+        }
+    }
+
+    /// 选一个新目标目录。默认落在当前目标所在目录，方便顺手挑个外接盘。
+    private func pickExtractDestination(startingAt current: URL) -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = NSLocalizedString("panel.extractTo.message", comment: "选择解压目标文件夹的提示语")
+        panel.prompt = NSLocalizedString("panel.extractTo.prompt", comment: "解压目标面板的确认按钮")
+        panel.directoryURL = current
+        guard panel.runModal() == .OK else { return nil }
+        return panel.url
+    }
+
+    /// 归档里有可执行文件：提醒一句，默认按钮是继续（不阻断）。
+    private func confirmExecutableEntries(_ paths: [String]) -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+        let names = paths.prefix(5).map { ($0 as NSString).lastPathComponent }
+        let sample = names.joined(separator: "、") + (paths.count > names.count ? " 等" : "")
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = paths.count == 1
+            ? L("归档里有一个可执行文件")
+            : String(format: L("归档里有 %d 个可执行文件"), paths.count)
+        alert.informativeText = String(
+            format: L("%@ 解出来后双击就会运行。确认来源可靠再打开。"),
+            sample
+        )
+        alert.addButton(withTitle: L("继续解压"))
+        alert.addButton(withTitle: L("取消"))
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// 解压后发现内容被写到目标目录外：这个必须让人知道，不能只写日志。
@@ -1580,19 +1939,32 @@ final class AppModel: ObservableObject {
 
     func handleIncomingURL(_ url: URL) {
         guard url.scheme == "threxo" else { return }
-        let paths = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-            .queryItems?.filter { $0.name == "path" }.compactMap(\.value) ?? []
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let paths = components?.queryItems?.filter { $0.name == "path" }.compactMap(\.value) ?? []
         let urls = paths.map { URL(fileURLWithPath: $0) }
         appDbg("handleIncomingURL host=\(url.host ?? "nil") paths=\(urls.count)")
         switch url.host {
         case "extract":
             extractAutomatically(urls)
+        case "extractTo":
+            // 右键「解压到指定目录…」：先让用户挑目录，挑完静默解。
+            chooseDestinationAndExtract(urls)
         case "compress":
-            compressAutomatically(urls)
+            // 访达可能逐个投递，攒 400ms 再动手，多选只出一个包。
+            enqueueSilentCompress(urls)
+        case "compressDialog":
+            beginCompressDialog(urls)
         case "add":
             #if DEBUG
             debugAdd(url)
             #endif
+        #if DEBUG
+        case "debugExtractTo":
+            // 仅调试：`threxo://debugExtractTo?dest=/Volumes/小盘&path=…`
+            // 绕过目录选择面板，直接验证空间预检 / 危险类型这些静默链路分支。
+            let dest = components?.queryItems?.first(where: { $0.name == "dest" })?.value
+            extractAutomatically(urls, to: dest.map { URL(fileURLWithPath: $0) })
+        #endif
         #if DEBUG
         case "about":
             // 仅调试：脚本里验一下关于/许可页能正常渲染，Release 不存在这个入口。

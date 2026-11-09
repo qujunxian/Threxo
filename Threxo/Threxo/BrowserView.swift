@@ -102,6 +102,11 @@ struct ArchiveBrowserView: View {
         .onChange(of: model.archiveURL) { _, _ in
             browser.prepare(for: model.treeNodes)
         }
+        // 拖进折叠的文件夹之后，把那一串目录展开，新条目才看得见（T-08）。
+        .onChange(of: model.revealRequest) { _, request in
+            guard let request else { return }
+            browser.expanded.formUnion(request.folders)
+        }
     }
 
     /// 详情栏左边缘的拖动条。往里拖变窄，往外拖变宽，松手即写盘。
@@ -286,6 +291,13 @@ struct ArchiveListView: View {
                 }
                 .listStyle(.inset)
                 .environment(\.defaultMinListRowHeight, 22)
+                .background(
+                    MultiDragInstaller(
+                        isEnabled: { model.selection.count > 1 },
+                        items: { model.dragItems(for: Array(model.selection)) },
+                        context: { model.dragContext }
+                    )
+                )
             } else {
                 List(rows, id: \.id, selection: $model.selection) { row in
                     rowBody(
@@ -308,6 +320,13 @@ struct ArchiveListView: View {
                 }
                 .listStyle(.inset)
                 .environment(\.defaultMinListRowHeight, 22)
+                .background(
+                    MultiDragInstaller(
+                        isEnabled: { model.selection.count > 1 },
+                        items: { model.dragItems(for: Array(model.selection)) },
+                        context: { model.dragContext }
+                    )
+                )
             }
         }
     }

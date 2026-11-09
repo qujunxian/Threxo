@@ -31,6 +31,7 @@
 		AA0000000000000000000084 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000085 /* SettingsView.swift */; };
 		AA0000000000000000000088 /* CompressWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000087 /* CompressWizardView.swift */; };
 		AA0000000000000000000090 /* BrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000091 /* BrowserView.swift */; };
+		AA0000000000000000000092 /* MultiDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000093 /* MultiDrag.swift */; };
 		AA0000000000000000000054 /* CompressionOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000055 /* CompressionOptions.swift */; };
 		AA0000000000000000000056 /* PasswordSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000057 /* PasswordSheet.swift */; };
 		AA0000000000000000000058 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000059 /* Assets.xcassets */; };
@@ -93,6 +94,7 @@
 		AA0000000000000000000085 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000087 /* CompressWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompressWizardView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000091 /* BrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000093 /* MultiDrag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/MultiDrag.swift"; sourceTree = "<group>"; };
 		AA0000000000000000000055 /* CompressionOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompressionOptions.swift; sourceTree = "<group>"; };
 		AA0000000000000000000057 /* PasswordSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordSheet.swift; sourceTree = "<group>"; };
 		AA0000000000000000000059 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -133,6 +135,7 @@
 				AA0000000000000000000057 /* PasswordSheet.swift */,
 				AA0000000000000000000087 /* CompressWizardView.swift */,
 				AA0000000000000000000091 /* BrowserView.swift */,
+				AA0000000000000000000093 /* MultiDrag.swift */,
 				AA0000000000000000000002 /* AppModel.swift */,
 				AA0000000000000000000037 /* Core */,
 				AA0000000000000000000038 /* Resources */,
@@ -328,6 +331,7 @@
 				AA0000000000000000000056 /* PasswordSheet.swift in Sources */,
 				AA0000000000000000000088 /* CompressWizardView.swift in Sources */,
 				AA0000000000000000000090 /* BrowserView.swift in Sources */,
+				AA0000000000000000000092 /* MultiDrag.swift in Sources */,
 				AA0000000000000000000005 /* ThrexoApp.swift in Sources */,
 				AA0000000000000000000007 /* SevenZipRunner.swift in Sources */,
 				AA0000000000000000000009 /* ArchiveLister.swift in Sources */,

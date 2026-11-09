@@ -429,3 +429,16 @@
 "显示「压缩后」列" = "Show Compressed Column";
 "显示详情栏" = "Show Details Panel";
 "列与面板" = "Columns & Panel";
+
+/* ===== 右键菜单补全 / 空间预检 / 拖拽（v1.1 T-06～T-08）===== */
+"源已选定，下一步选保存位置。" = "Files are already chosen — next, pick where to save.";
+"选择保存位置…" = "Choose Location…";
+"目标位置空间不足" = "Not Enough Space at the Destination";
+"解压后需要 %@，目标卷可用 %@。可以换个位置，或仍然解压（可能中途失败）。" = "Extracting needs %@ but the volume only has %@ free. Pick another location, or extract anyway (it may fail partway).";
+"换位置…" = "Change Location…";
+"空间不足：解压需要 %@，目标卷可用 %@。" = "Not enough space: extraction needs %@ but the volume has %@.";
+"归档里有一个可执行文件" = "This archive contains an executable file";
+"归档里有 %d 个可执行文件" = "This archive contains %d executable files";
+"%@ 解出来后双击就会运行。确认来源可靠再打开。" = "%@ will run on double-click once extracted. Make sure you trust the source before opening it.";
+"继续解压" = "Extract Anyway";
+"含 %d 个可执行文件（%@）" = "Contains %d executable files (%@)";
