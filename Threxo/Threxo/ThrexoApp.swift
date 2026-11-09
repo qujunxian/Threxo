@@ -525,14 +525,24 @@ final class JobHUD: NSObject {
         cancel.target = self
         cancel.isEnabled = model.isBusy
 
+        // 任务真的卡住时（没有进程在跑、也没在等密码），给一个不用重启就能恢复的出口。
+        let reset = NSMenuItem(title: L("复位卡住的任务"), action: #selector(resetStalled), keyEquivalent: "")
+        reset.target = self
+        reset.isEnabled = model.canResetStalledTask
+
         let menu = NSMenu()
         menu.addItem(status)
         menu.addItem(.separator())
         menu.addItem(cancel)
+        menu.addItem(reset)
         item.menu = menu
     }
 
     @objc private func cancelJob() {
         model?.cancel()
+    }
+
+    @objc private func resetStalled() {
+        model?.recoverIfStalled(force: true)
     }
 }

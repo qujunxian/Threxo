@@ -442,3 +442,7 @@
 "%@ 解出来后双击就会运行。确认来源可靠再打开。" = "%@ will run on double-click once extracted. Make sure you trust the source before opening it.";
 "继续解压" = "Extract Anyway";
 "含 %d 个可执行文件（%@）" = "Contains %d executable files (%@)";
+
+/* ===== 任务卡死自愈（2026-11-09 缺陷修复）===== */
+"上一个任务没有正常结束，已复位" = "The previous task didn't finish — it has been reset";
+"复位卡住的任务" = "Reset Stuck Task";

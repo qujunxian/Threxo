@@ -142,7 +142,8 @@ final class SevenZipRunner {
     /// 这里改成从管道读到 EOF，输出完整才返回。
     func runCollecting(
         arguments: [String],
-        workingDirectory: URL? = nil
+        workingDirectory: URL? = nil,
+        onStart: ((Process) -> Void)? = nil
     ) throws -> (code: Int32, output: String, error: String) {
         let process = Process()
         process.executableURL = executableURL
@@ -156,6 +157,7 @@ final class SevenZipRunner {
         process.standardError = stderrPipe
 
         try process.run()
+        onStart?(process)
 
         // stdout / stderr 必须并行读，否则一边写满 64KB 管道，另一边就永远等不到 EOF。
         var errorData = Data()

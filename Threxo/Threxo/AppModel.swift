@@ -67,7 +67,18 @@ final class AppModel: ObservableObject {
     private static let sortKeyDefaultsKey = "threxo.browse.sortKey"
     private static let sortAscendingDefaultsKey = "threxo.browse.sortAscending"
 
-    @Published var isBusy = false
+    @Published var isBusy = false {
+        didSet {
+            guard oldValue != isBusy else { return }
+            if isBusy {
+                busyStartedAt = Date()
+                lastTaskActivity = Date()
+            } else {
+                busyStartedAt = nil
+                activeProcess = nil
+            }
+        }
+    }
     @Published var progress: Int = 0
     @Published var statusText = L("就绪")
     @Published var errorMessage: String?
@@ -113,6 +124,16 @@ final class AppModel: ObservableObject {
 
     private var activeProcess: Process?
     private let runner: SevenZipRunner
+
+    /// isBusy 从什么时刻开始，仅用于日志与卡死判定。
+    private var busyStartedAt: Date?
+    /// 最近一次「确实有进展」的时刻：进程起来、7zz 报进度、列目录开始 / 结束。
+    /// 判定卡死必须同时满足「没有子进程在跑」和「这里很久没动」，只看时间会误杀大文件压缩。
+    private var lastTaskActivity = Date()
+
+    /// 无进展多久算卡死。7zz 在极限压缩时可能长时间不吐进度，所以阈值放宽到 20 秒；
+    /// 真正的判定条件是「同时没有子进程」，那种情况下根本不可能再前进。
+    private static let stallTimeout: TimeInterval = 20
 
     /// 压缩已完成但自检未通过时，这里存失败原因。
     /// 用它区分「压缩本身失败」和「文件写出来了但校验不过」——两者的
@@ -274,7 +295,7 @@ final class AppModel: ObservableObject {
     // MARK: - Open / list
 
     func openArchive() {
-        guard !isBusy else { return }
+        guard canStartTask() else { return }
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
@@ -288,6 +309,7 @@ final class AppModel: ObservableObject {
 
     func load(archive url: URL) {
         isBusy = true
+        noteActivity()
         progress = 0
         errorMessage = nil
         currentItem = nil
@@ -426,7 +448,7 @@ final class AppModel: ObservableObject {
 
     /// 一键解压：位置跟随设置。默认解到归档同级的新文件夹，重名自动加序号。
     func extractAll() {
-        guard !isBusy, let archive = archiveURL else { return }
+        guard canStartTask(), let archive = archiveURL else { return }
         guard let dest = extractionDestination(for: archive) else { return }
         extract(archive: archive, to: dest, items: [], status: L("正在解压…"), reveal: true)
     }
@@ -461,7 +483,7 @@ final class AppModel: ObservableObject {
 
     /// 手动选择解压位置。
     func extractAllChoosingDestination() {
-        guard !isBusy, let archive = archiveURL else { return }
+        guard canStartTask(), let archive = archiveURL else { return }
 
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -492,7 +514,7 @@ final class AppModel: ObservableObject {
 
     /// 把指定条目解到用户挑的目录（保留包内相对路径）。
     func extractPaths(_ paths: [String], choosingDestination: Bool) {
-        guard !isBusy, let archive = archiveURL else { return }
+        guard canStartTask(), let archive = archiveURL else { return }
         let items = expandSelection(Set(paths))
         guard !items.isEmpty else { return }
 
@@ -524,7 +546,7 @@ final class AppModel: ObservableObject {
 
     /// 只解压选中的条目（选中的文件夹会自动展开为其中的文件）。
     func extractSelected() {
-        guard !isBusy, let archive = archiveURL, !selection.isEmpty else { return }
+        guard canStartTask(), let archive = archiveURL, !selection.isEmpty else { return }
         let items = expandSelection(selection)
         guard !items.isEmpty else { return }
         let dest = uniqueExtractDestination(for: archive)
@@ -539,7 +561,7 @@ final class AppModel: ObservableObject {
 
     /// 解到「压缩包同级的同名文件夹」，重名就换下一个名字——与主按钮同一套语义。
     func extractPathsToNewFolder(_ paths: [String]) {
-        guard !isBusy, let archive = archiveURL else { return }
+        guard canStartTask(), let archive = archiveURL else { return }
         let items = expandSelection(Set(paths))
         guard !items.isEmpty else { return }
         let dest = uniqueExtractDestination(for: archive)
@@ -701,7 +723,7 @@ final class AppModel: ObservableObject {
     /// - Parameter destination: 非 nil 时全部解到这里（右键「解压到指定目录…」用）。
     func extractAutomatically(_ urls: [URL], to destination: URL? = nil) {
         guard !urls.isEmpty else { return }
-        guard !isBusy else { NSSound.beep(); return }
+        guard canStartTask() else { NSSound.beep(); return }
 
         let archives = urls
         if let destination {
@@ -818,7 +840,7 @@ final class AppModel: ObservableObject {
             receiveOpenFiles(urls)
             return
         }
-        guard !isBusy else { NSSound.beep(); return }
+        guard canStartTask() else { NSSound.beep(); return }
         guard ArchiveEditing.canAppend(to: archive) else {
             errorMessage = String(
                 format: L("「%@」这种格式装不下多个条目，无法直接追加文件。请先解压再重新打包。"),
@@ -1039,7 +1061,7 @@ final class AppModel: ObservableObject {
     // MARK: - Compress (UI flow)
 
     func compress() {
-        guard !isBusy else { return }
+        guard canStartTask() else { return }
 
         if let mismatch = options.passwordValidationMessage {
             errorMessage = mismatch
@@ -1060,7 +1082,7 @@ final class AppModel: ObservableObject {
     /// 格式与密码由向导提前选好，这里不能再弹一次选源面板。
     func compress(sources: [URL]) {
         guard !sources.isEmpty else { return }
-        guard !isBusy else { NSSound.beep(); return }
+        guard canStartTask() else { NSSound.beep(); return }
 
         if let mismatch = options.passwordValidationMessage {
             errorMessage = mismatch
@@ -1088,7 +1110,7 @@ final class AppModel: ObservableObject {
     /// 不覆盖已有归档：同名时自动追加序号（a.zip → a 2.zip），避免静默丢数据。
     func compressAutomatically(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
-        guard !isBusy else { NSSound.beep(); return }
+        guard canStartTask() else { NSSound.beep(); return }
         let dir = urls[0].deletingLastPathComponent()
         let base = Self.defaultArchiveBase(for: urls)
         let ext = options.format.fileExtension
@@ -1692,6 +1714,7 @@ final class AppModel: ObservableObject {
                             DispatchQueue.main.async {
                                 guard let self else { return }
                                 if self.progress < event.percent { self.progress = event.percent }
+                                self.noteActivity()
                                 if let item = SevenZipRunner.parseCurrentItem(event.raw) {
                                     self.currentItem = item
                                 }
@@ -1845,6 +1868,7 @@ final class AppModel: ObservableObject {
                             DispatchQueue.main.async {
                                 guard let self else { return }
                                 if self.progress < mapped { self.progress = mapped }
+                                self.noteActivity()
                                 if let item = SevenZipRunner.parseCurrentItem(event.raw) {
                                     self.currentItem = item
                                 }
@@ -1864,12 +1888,30 @@ final class AppModel: ObservableObject {
     }
 
     /// 同步跑一次 7zz，收集 stdout / stderr。用于列目录、拆中间 tar 这类短命令。
+    ///
+    /// 这条路径也要登记 `activeProcess`：列一个几万条的归档可能要几百毫秒到几秒，
+    /// 卡死判定靠「有没有子进程」来区分「真在跑」和「永远回不来」，漏登记就会误判。
     private func runSync(_ args: [String]) async -> (code: Int32, output: String, error: String) {
         let runner = self.runner
         return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = (try? runner.runCollecting(arguments: args))
-                    ?? (code: -1, output: "", error: "")
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let result = (try? runner.runCollecting(
+                    arguments: args,
+                    onStart: { process in
+                        DispatchQueue.main.async {
+                            self?.activeProcess = process
+                            self?.noteActivity()
+                        }
+                    }
+                )) ?? (code: -1, output: "", error: "")
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    // 只清掉自己那一个：期间可能已经有新进程接管了这个字段。
+                    if self.activeProcess?.isRunning == false {
+                        self.activeProcess = nil
+                    }
+                    self.noteActivity()
+                }
                 continuation.resume(returning: result)
             }
         }
@@ -1910,6 +1952,55 @@ final class AppModel: ObservableObject {
 
     // MARK: - Task plumbing
 
+    /// 记一次「有进展」，卡死判定用。
+    private func noteActivity() {
+        lastTaskActivity = Date()
+    }
+
+    /// 新任务能不能开工。开工前顺手检查上一次是不是卡死了。
+    ///
+    /// 只要 `isBusy` 为真、又没有子进程在跑、也没有在等用户输密码，
+    /// 那么这个任务实际上不可能再往前推——它的 `continuation` 丢了。
+    /// 不在这里复位，后续所有入口都会被 `isBusy` 挡掉，用户看到的就是「点了没反应」。
+    func canStartTask() -> Bool {
+        _ = recoverIfStalled()
+        return !isBusy
+    }
+
+    /// 菜单栏「复位」是否可用：有任务挂着，但既没有进程在跑、也没有在等密码。
+    var canResetStalledTask: Bool {
+        guard isBusy else { return false }
+        guard passwordContinuation == nil, passwordPrompt == nil else { return false }
+        return !(activeProcess?.isRunning ?? false)
+    }
+
+    /// 复位卡住的任务。
+    /// - Parameter force: 菜单栏手动点击时为 true，跳过 20 秒静默期；自动判定走默认值。
+    /// - Returns: 是否真的做了复位。
+    @discardableResult
+    func recoverIfStalled(force: Bool = false) -> Bool {
+        guard isBusy else { return false }
+        // 正在等用户输密码：这是正常等待，不是卡死，不能替他取消。
+        guard passwordContinuation == nil, passwordPrompt == nil else { return false }
+        if let process = activeProcess, process.isRunning { return false }
+        let idle = Date().timeIntervalSince(lastTaskActivity)
+        guard force || idle > Self.stallTimeout else { return false }
+
+        appDbg("recover stalled task idle=\(Int(idle))s status=\(statusText)")
+        let wasSilent = silentRun
+        isBusy = false
+        progress = 0
+        currentItem = nil
+        statusText = L("上一个任务没有正常结束，已复位")
+        // 静默任务卡在这里时进程不会自己退出（收尾逻辑永远等不到），
+        // 复位后按「任务已结束」收尾，让这个可能已经没用的进程退掉。
+        if wasSilent {
+            silentRun = false
+            AppDelegate.shared?.endHeadlessJob()
+        }
+        return true
+    }
+
     /// Runs `work` off-main with the busy spinner, then calls `completion` on main.
     private func runTask(
         status: String,
@@ -1921,10 +2012,12 @@ final class AppModel: ObservableObject {
         errorMessage = nil
         currentItem = nil
         statusText = status
+        noteActivity()
         Task.detached(priority: .userInitiated) {
             let code = await work()
             await MainActor.run {
                 self.activeProcess = nil
+                self.noteActivity()
                 self.isBusy = false
                 completion(code)
             }
@@ -1942,7 +2035,7 @@ final class AppModel: ObservableObject {
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         let paths = components?.queryItems?.filter { $0.name == "path" }.compactMap(\.value) ?? []
         let urls = paths.map { URL(fileURLWithPath: $0) }
-        appDbg("handleIncomingURL host=\(url.host ?? "nil") paths=\(urls.count)")
+        appDbg("handleIncomingURL host=\(url.host ?? "nil") paths=\(urls.count) busy=\(isBusy) idle=\(Int(Date().timeIntervalSince(lastTaskActivity)))s")
         switch url.host {
         case "extract":
             extractAutomatically(urls)
@@ -1969,6 +2062,15 @@ final class AppModel: ObservableObject {
         case "about":
             // 仅调试：脚本里验一下关于/许可页能正常渲染，Release 不存在这个入口。
             AboutWindowController.shared.show()
+        case "reset":
+            // 仅调试：不用碰菜单栏就能复现 / 验证卡死复位这条路径。
+            appDbg("debug reset forced=\(recoverIfStalled(force: true))")
+        case "stall":
+            // 仅调试：造一个「isBusy 卡死」的现场（没有进程、没有等待），验证自动复位。
+            guard !isBusy else { break }
+            isBusy = true
+            statusText = L("模拟卡死")
+            appDbg("debug stall injected")
         case "settings":
             // 仅调试：`threxo://settings?page=extract` 直接落到某一页，方便逐页核对布局。
             let page = URLComponents(url: url, resolvingAgainstBaseURL: false)?
@@ -2021,6 +2123,9 @@ final class AppModel: ObservableObject {
             return Self.promptPasswordWithAlert(isRetry: isRetry)
         }
         return await withCheckedContinuation { continuation in
+            // 上一个密码框还没回话就被新请求顶掉时，先把旧的按「取消」收尾。
+            // 直接覆盖会让旧 continuation 永远等不到 resume，它所在的任务就再也回不来。
+            passwordContinuation?.resume(returning: nil)
             passwordContinuation = continuation
             passwordPrompt = PasswordPrompt(
                 title: isRetry ? L("密码不正确") : L("需要密码"),
@@ -2047,6 +2152,10 @@ final class AppModel: ObservableObject {
         field.placeholderString = L("密码")
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
+        // 静默链路里 App 可能不是前台的，普通层级的窗口会被别的 App 盖住，
+        // 看起来就是「点了右键没反应」。抬到浮动层，保证一定看得见。
+        alert.window.level = .floating
+        alert.window.makeKeyAndOrderFront(nil)
 
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
         let text = field.stringValue
