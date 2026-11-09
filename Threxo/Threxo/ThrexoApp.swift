@@ -259,7 +259,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             jobStarted = true
             MainWindowController.shared.retractIfEmpty()
             DispatchQueue.main.async {
-                AppModel.shared.extractAutomatically([archive])
+                AppModel.shared.extractAutomatically([archive], revealResult: true)
             }
             return
         }
@@ -351,7 +351,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if SettingsStore.shared.quickExtractOnDoubleClick,
            let archive = urls.first(where: { AppModel.isArchiveURL($0) }) {
             DispatchQueue.main.async {
-                AppModel.shared.extractAutomatically([archive])
+                AppModel.shared.extractAutomatically([archive], revealResult: true)
             }
             sender.reply(toOpenOrPrint: .success)
             return
@@ -450,16 +450,33 @@ func snapshotView<V: View>(_ view: V, size: CGSize, to path: String) {
 @MainActor
 func renderBrowserPreview(archive: URL?, mode: SettingsStore.BrowseMode?, to path: String) {
     let model = AppModel.shared
-    if let archive { model.debugLoadAndWait(archive) }
-    if let mode { SettingsStore.shared.browseMode = mode }
     let env = ProcessInfo.processInfo.environment
-    if let query = env["THREXO_RENDER_SEARCH"] { model.searchText = query }
-    if let raw = env["THREXO_RENDER_SORT"], let key = ArchiveSortKey(rawValue: raw) { model.sortKey = key }
-    if let selected = env["THREXO_RENDER_SELECT"] { model.selection = [selected] }
+    // 尺寸可指定，用来离屏核对「窗口缩小后会不会遮挡」这类布局问题。
+    let width = CGFloat(Double(env["THREXO_RENDER_WIDTH"] ?? "") ?? 1060)
+    let height = CGFloat(Double(env["THREXO_RENDER_HEIGHT"] ?? "") ?? 660)
+    let size = CGSize(width: width, height: height)
+
+    if env["THREXO_RENDER_COMPOSE"] == "1" {
+        var sources: [URL] = []
+        for name in ["界面截图-长名字测试版本.png", "原型参考.png", "素材夹"] {
+            let url = URL(fileURLWithPath: "/tmp/compose-test/" + name)
+            if FileManager.default.fileExists(atPath: url.path) { sources.append(url) }
+        }
+        ComposeArchiveState.shared.activate(sources: sources)
+    } else {
+        if let archive { model.debugLoadAndWait(archive) }
+        if let mode { SettingsStore.shared.browseMode = mode }
+        if let query = env["THREXO_RENDER_SEARCH"] { model.searchText = query }
+        if let raw = env["THREXO_RENDER_SORT"], let key = ArchiveSortKey(rawValue: raw) { model.sortKey = key }
+        if let selected = env["THREXO_RENDER_SELECT"] { model.selection = [selected] }
+    }
+
     let view = ContentView()
         .environmentObject(model)
-        .frame(width: 1060, height: 660)
-    snapshotView(view, size: CGSize(width: 1060, height: 660), to: path)
+        // 离屏窗口是 borderless，不给一层窗口底色会拍出「白底 + 深色列表」的假象。
+        .background(Color(nsColor: .windowBackgroundColor))
+        .frame(width: size.width, height: size.height)
+    snapshotView(view, size: size, to: path)
 }
 #endif
 
@@ -515,6 +532,14 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     /// 解压设置里勾了「关闭压缩包窗口」时用。
     func close() {
         window?.close()
+    }
+
+    /// 点红绿灯关掉主窗口：把当前归档 / 创建清单清掉。
+    /// 窗口对象本身不释放（`isReleasedWhenClosed = false`），下次点 Dock 图标
+    /// 复用同一个窗口，但内容已经是欢迎页，不会再莫名其妙回到上一次的压缩包。
+    func windowWillClose(_ notification: Notification) {
+        autoShownAtLaunch = false
+        AppModel.shared.returnToHome()
     }
 
     private func makeWindow() -> NSWindow {

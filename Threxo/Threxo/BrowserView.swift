@@ -154,7 +154,7 @@ struct ArchiveBrowserView: View {
 
             Picker("", selection: $settings.browseMode) {
                 ForEach(SettingsStore.BrowseMode.allCases) { mode in
-                    Image(systemName: mode.symbolName)
+                    ThemeIcon(symbol: mode.symbolName, size: 11)
                         .help(mode.title)
                         .tag(mode)
                 }
@@ -164,32 +164,31 @@ struct ArchiveBrowserView: View {
             .frame(width: 118)
             .help(L("切换列表、图标、分栏"))
 
-            Button {
+            ThemeIconButton(
+                symbol: settings.showAuxiliaryItems ? "eye" : "eye.slash",
+                help: settings.showAuxiliaryItems
+                    ? L("隐藏 __MACOSX 等辅助项目") : L("显示 __MACOSX 等辅助项目")
+            ) {
                 settings.showAuxiliaryItems.toggle()
-            } label: {
-                Image(systemName: settings.showAuxiliaryItems ? "eye" : "eye.slash")
             }
-            .buttonStyle(.borderless)
-            .help(settings.showAuxiliaryItems ? L("隐藏 __MACOSX 等辅助项目") : L("显示 __MACOSX 等辅助项目"))
 
             Menu {
                 Toggle(L("显示「压缩后」列"), isOn: $browser.showPackedColumn)
                 Toggle(L("显示详情栏"), isOn: $browser.showDetail)
             } label: {
-                Image(systemName: "ellipsis.circle")
+                ThemeIcon(symbol: "ellipsis.circle", size: 12)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
             .help(L("列与面板"))
 
-            Button {
+            ThemeIconButton(
+                symbol: "sidebar.right",
+                help: browser.showDetail ? L("隐藏详情") : L("显示详情")
+            ) {
                 browser.showDetail.toggle()
-            } label: {
-                Image(systemName: "sidebar.right")
             }
-            .buttonStyle(.borderless)
-            .help(browser.showDetail ? L("隐藏详情") : L("显示详情"))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)

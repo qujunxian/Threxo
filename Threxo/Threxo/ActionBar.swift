@@ -6,9 +6,12 @@ import QuickLookUI
 
 /// 解压页与创建页共用的底栏外壳：左边一组动作，右边主操作。
 ///
-/// 只统一「壳」——高度、内边距、胶囊容器、按钮的字号与快捷键小方块；
-/// 具体放哪些动作由各页面自己决定，这样两页看着是一套，又不会互相绑架。
+/// 壳自己负责三件事：统一高度 / 内边距、按可用宽度决定「完整」还是「紧凑」，
+/// 以及把紧凑标志通过 Environment 传给里面的按钮和状态文字。
+/// 具体放哪些动作由各页面自己决定，但样式一律取自 `AppTheme`。
 struct ActionBar<Leading: View, Trailing: View>: View {
+    @Environment(\.appTheme) private var theme
+
     private let leading: () -> Leading
     private let trailing: () -> Trailing
 
@@ -19,18 +22,42 @@ struct ActionBar<Leading: View, Trailing: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            leading()
-            Spacer(minLength: 8)
-            trailing()
+        GeometryReader { geo in
+            let compact = geo.size.width < theme.compactBreakpoint
+            HStack(spacing: 10) {
+                leading()
+                Spacer(minLength: 8)
+                trailing()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .environment(\.actionBarCompact, compact)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        // GeometryReader 没有固有高度，不给一个就会把底栏压成 0。
+        // 高度跟主操作按钮联动，主题换大号按钮时这里自动跟着长。
+        .frame(height: theme.primaryHeight + 16)
+    }
+}
+
+/// 窄屏时自动隐藏的非关键内容（状态文字、计数、错误提示）。
+/// 这样按钮永远拿得到宽度，不会再出现文字压到按钮上的遮挡。
+struct CompactHidden<Content: View>: View {
+    @Environment(\.actionBarCompact) private var compact
+    private let content: () -> Content
+
+    init(@ViewBuilder content: @escaping () -> Content) {
+        self.content = content
+    }
+
+    var body: some View {
+        if compact { EmptyView() } else { content() }
     }
 }
 
 /// 底栏里的浅色胶囊容器：把几个动作拢成一组。
 struct ActionPill<Content: View>: View {
+    @Environment(\.appTheme) private var theme
     private let content: () -> Content
 
     init(@ViewBuilder content: @escaping () -> Content) {
@@ -43,13 +70,17 @@ struct ActionPill<Content: View>: View {
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 3)
-        .background(Capsule().fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08)))
+        .background(Capsule().fill(theme.pillBackground))
+        .overlay(Capsule().strokeBorder(theme.pillBorder))
     }
 }
 
 /// 底栏里的单个动作：图标 + 文字 + 可选快捷键小方块。
+/// 紧凑模式只留图标，help 仍然保留完整说明。
 struct ActionButton: View {
+    @Environment(\.appTheme) private var theme
+    @Environment(\.actionBarCompact) private var compact
+
     let title: String
     let symbol: String
     var shortcut: String?
@@ -60,25 +91,26 @@ struct ActionButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                Image(systemName: symbol)
-                    .font(.system(size: 11.5))
+                ThemeIcon(symbol: symbol, size: theme.barSymbolSize,
+                          tone: isEnabled ? .normal : .secondary)
+                // 文字始终保留（只留图标会让人认不出动作），紧凑时先让快捷键徽标让位。
                 Text(title)
-                    .font(.system(size: 11.5))
-                if let shortcut {
+                    .font(.system(size: theme.barFont))
+                if !compact, let shortcut {
                     Text(shortcut)
                         .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.iconSecondary)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1.5)
                         .background(
                             RoundedRectangle(cornerRadius: 3.5)
-                                .fill(Color.primary.opacity(0.07))
+                                .fill(theme.shortcutChip)
                         )
                 }
             }
-            .foregroundStyle(isEnabled ? Color.primary : Color.secondary.opacity(0.55))
-            .padding(.horizontal, 9)
-            .frame(height: 24)
+            .foregroundStyle(isEnabled ? theme.icon : theme.iconSecondary.opacity(0.55))
+            .padding(.horizontal, compact ? 6 : 9)
+            .frame(height: theme.controlHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(ActionButtonStyle())
@@ -88,11 +120,13 @@ struct ActionButton: View {
 }
 
 private struct ActionButtonStyle: ButtonStyle {
+    @Environment(\.appTheme) private var theme
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(configuration.isPressed ? Color.primary.opacity(0.10) : Color.clear)
+                RoundedRectangle(cornerRadius: theme.cornerRadius)
+                    .fill(configuration.isPressed ? theme.pressedOverlay : Color.clear)
             )
     }
 }

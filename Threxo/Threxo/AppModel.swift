@@ -110,6 +110,9 @@ final class AppModel: ObservableObject {
     /// 由 pkd 提供，状态可能滞后数秒，界面上提供手动刷新。
     @Published var finderExtensionEnabled = false
 
+    /// 常用格式里还没交给千梭的数量。双击压缩包没反应时，欢迎页据此提示去关联。
+    @Published private(set) var unassociatedCommonCount = 0
+
     /// 压缩设置（格式 / 级别 / 密码 / 排除 / 删源），与界面共享同一实例。
     let options = CompressionOptions.shared
 
@@ -292,11 +295,19 @@ final class AppModel: ObservableObject {
 
     // MARK: - Finder extension
 
-    /// 重新向系统查询扩展启用状态。
+    /// 重新向系统查询扩展启用状态，顺带核对常用格式的默认打开程序。
+    /// 格式关联要问 LaunchServices 二十多次，放到后台算完再回主线程，别卡住窗口出现动画。
     func refreshFinderExtensionState() {
         let enabled = FIFinderSyncController.isExtensionEnabled
         if enabled != finderExtensionEnabled {
             finderExtensionEnabled = enabled
+        }
+        DispatchQueue.global(qos: .utility).async {
+            let bindings = SettingsStore.shared.currentFormatBindings()
+            let count = bindings.filter { !$0.cautious && $0.uti != nil && !$0.isDefault }.count
+            DispatchQueue.main.async { [weak self] in
+                self?.unassociatedCommonCount = count
+            }
         }
     }
 
@@ -391,6 +402,15 @@ final class AppModel: ObservableObject {
     // MARK: - 嵌套压缩包
 
     var isNestedArchive: Bool { !nestedChain.isEmpty }
+
+    /// 解压目标必须锚定在**磁盘上那个原始包**旁边。
+    /// 嵌套时 `archiveURL` 指向 `/tmp/ThrexoDrop-…/<内层包>`，是临时副本；
+    /// 拿它推导目录会把结果解进临时目录，退回外层就被清掉、用户在访达里根本找不到。
+    /// 多层嵌套时 `nestedChain[0].parentURL` 始终是最外层那个真实文件。
+    var extractionAnchorURL: URL? {
+        if let root = nestedChain.first?.parentURL { return root }
+        return archiveURL
+    }
 
     /// 祖先链：outer.zip › mid.zip，标题与详情栏都用它。
     var nestedTrail: String {
@@ -614,12 +634,13 @@ final class AppModel: ObservableObject {
     /// 按设置决定「解压」按钮落到哪里。
     /// 默认仍然解到同级的新文件夹——直接铺在源目录旁边，同名文件一多就分不清哪些是刚解出来的。
     private func extractionDestination(for archive: URL) -> URL? {
+        let anchor = extractionAnchorURL ?? archive
         switch SettingsStore.shared.extractionTarget {
         case .archiveFolder:
             return uniqueExtractDestination(for: archive)
 
         case .lastUsed:
-            let dir = SettingsStore.shared.lastExtractDirectory ?? archive.deletingLastPathComponent()
+            let dir = SettingsStore.shared.lastExtractDirectory ?? anchor.deletingLastPathComponent()
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             return dir
 
@@ -632,7 +653,7 @@ final class AppModel: ObservableObject {
             panel.message = NSLocalizedString("panel.extractTo.message", comment: "选择解压目标文件夹的提示语")
             panel.prompt = NSLocalizedString("panel.extractTo.prompt", comment: "解压目标面板的确认按钮")
             panel.directoryURL = SettingsStore.shared.lastExtractDirectory
-                ?? archive.deletingLastPathComponent()
+                ?? anchor.deletingLastPathComponent()
             guard panel.runModal() == .OK, let chosen = panel.url else { return nil }
             SettingsStore.shared.lastExtractDirectory = chosen
             return chosen
@@ -642,6 +663,7 @@ final class AppModel: ObservableObject {
     /// 手动选择解压位置。
     func extractAllChoosingDestination() {
         guard canStartTask(), let archive = archiveURL else { return }
+        let anchor = extractionAnchorURL ?? archive
 
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -650,7 +672,7 @@ final class AppModel: ObservableObject {
         panel.allowsMultipleSelection = false
         panel.message = NSLocalizedString("panel.extractTo.message", comment: "选择解压目标文件夹的提示语")
         panel.prompt = NSLocalizedString("panel.extractTo.prompt", comment: "解压目标面板的确认按钮")
-        panel.directoryURL = archive.deletingLastPathComponent()
+        panel.directoryURL = anchor.deletingLastPathComponent()
         guard panel.runModal() == .OK, let dest = panel.url else { return }
 
         extract(archive: archive, to: dest, items: [], status: L("正在解压…"), reveal: true)
@@ -673,6 +695,7 @@ final class AppModel: ObservableObject {
     /// 把指定条目解到用户挑的目录（保留包内相对路径）。
     func extractPaths(_ paths: [String], choosingDestination: Bool) {
         guard canStartTask(), let archive = archiveURL else { return }
+        let anchor = extractionAnchorURL ?? archive
         let items = expandSelection(Set(paths))
         guard !items.isEmpty else { return }
 
@@ -685,12 +708,12 @@ final class AppModel: ObservableObject {
             panel.allowsMultipleSelection = false
             panel.message = NSLocalizedString("panel.extractTo.message", comment: "选择解压目标文件夹的提示语")
             panel.prompt = NSLocalizedString("panel.extractTo.prompt", comment: "解压目标面板的确认按钮")
-            panel.directoryURL = archive.deletingLastPathComponent()
+            panel.directoryURL = anchor.deletingLastPathComponent()
             guard panel.runModal() == .OK, let chosen = panel.url else { return }
             dest = chosen
         } else {
-            // 「解到压缩包所在文件夹」：直接铺在原地，重名自动改名，绝不覆盖。
-            dest = archive.deletingLastPathComponent()
+            // 「解到压缩包所在文件夹」：铺在原始包旁边，重名自动改名，绝不覆盖。
+            dest = anchor.deletingLastPathComponent()
         }
 
         extract(
@@ -777,8 +800,11 @@ final class AppModel: ObservableObject {
                 }
                 self.applyArchiveHandling(archive: archive)
                 // 「每次询问」时由弹窗决定关不关窗口，这里先不抢着关。
+                // 内层包只是从父包里临时解出来的一层，解完还要留在外层继续浏览，
+                // 此时关窗口等于把用户正在看的整个归档丢掉。
                 if self.extractCompletionPrompt == nil,
                    SettingsStore.shared.closeAfterExtract,
+                   !self.isNestedArchive,
                    self.archiveURL == archive {
                     self.unloadArchive()
                     MainWindowController.shared.close()
@@ -965,10 +991,31 @@ final class AppModel: ObservableObject {
         archiveEncrypted = false
     }
 
+    /// 关闭主窗口：清掉当前归档 / 创建清单，下次打开直接回到欢迎页。
+    /// 正在跑任务时不动现场，免得解压到一半把状态抹掉。
+    func returnToHome() {
+        guard !isBusy else { return }
+        unloadArchive()
+        allEntries = []
+        baseEntries = []
+        baseDirty = true
+        childrenIndex = [:]
+        searchText = ""
+        errorMessage = nil
+        statusText = L("就绪")
+        progress = 0
+        currentItem = nil
+        extractCompletionPrompt = nil
+        revealRequest = nil
+        ComposeArchiveState.shared.deactivate()
+    }
+
     /// 访达右键：逐个解压到**压缩包所在文件夹**（右键时的那个「当前目录」）。
     /// 不建窗口、不弹位置选择；已有同名文件由 `-aou` 自动改名，绝不静默覆盖。
     /// - Parameter destination: 非 nil 时全部解到这里（右键「解压到指定目录…」用）。
-    func extractAutomatically(_ urls: [URL], to destination: URL? = nil) {
+    /// - Parameter revealResult: 双击归档时为 true——静默解压本来不弹任何界面，
+    ///   完成后在访达里把结果选出来，用户才知道文件落在哪（右键任务不打扰，保持 false）。
+    func extractAutomatically(_ urls: [URL], to destination: URL? = nil, revealResult: Bool = false) {
         guard !urls.isEmpty else { return }
         guard canStartTask() else { NSSound.beep(); return }
 
@@ -1013,6 +1060,9 @@ final class AppModel: ObservableObject {
                 self.statusText = archives.count > 1
                     ? String(format: L("已解压 %d 个归档到当前文件夹"), archives.count)
                     : L("解压完成，文件已放到当前文件夹")
+                if revealResult {
+                    NSWorkspace.shared.activateFileViewerSelecting([folder])
+                }
                 if let used = self.archivePassword, SettingsStore.shared.vaultAutoSave {
                     for archive in archives {
                         PasswordVault.shared.upsert(
@@ -2563,6 +2613,22 @@ final class AppModel: ObservableObject {
             if !ComposeArchiveState.shared.items.isEmpty {
                 ComposeArchiveState.shared.showWizard = true
             }
+        case "load":
+            // 仅调试：不经过 odoc（避开「双击快速解压」设置）直接把归档读进窗口。
+            guard let target = urls.first else { break }
+            MainWindowController.shared.show()
+            load(archive: target)
+        case "debugAnchor":
+            // 仅调试：核对嵌套包的解压锚点，确保不会解到 /tmp/ThrexoDrop-* 里。
+            appDbg("debugAnchor current=\(archiveURL?.path ?? "-") "
+                   + "anchor=\(extractionAnchorURL?.path ?? "-") "
+                   + "dest=\(archiveURL.map { uniqueExtractDestination(for: $0).path } ?? "-") "
+                   + "nested=\(nestedChain.count)")
+        case "closeWindow":
+            // 仅调试：验证红绿灯关窗会清掉现场、回到欢迎页。
+            MainWindowController.shared.close()
+            appDbg("debug closeWindow archive=\(archiveURL?.path ?? "nil") "
+                   + "compose=\(ComposeArchiveState.shared.isActive)")
         case "extractAll":
             // 仅调试：走真实的窗口链路解压，验证完成后会自动弹询问卡片。
             MainWindowController.shared.show()
@@ -2777,7 +2843,8 @@ final class AppModel: ObservableObject {
     /// 解压目标：归档同级的同名文件夹，已存在则依次尝试「名字 2」「名字 3」…，
     /// 绝不覆盖已有目录（避免解压把上一个结果覆盖掉）。
     private func uniqueExtractDestination(for archive: URL) -> URL {
-        let dir = archive.deletingLastPathComponent()
+        // 位置跟外层原始包，名字跟当前正在看的这一层（内嵌包用自己的名字更直观）。
+        let dir = (extractionAnchorURL ?? archive).deletingLastPathComponent()
         let stem = Self.archiveStem(archive)
         var candidate = dir.appendingPathComponent(stem)
         var counter = 2

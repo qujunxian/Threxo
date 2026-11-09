@@ -289,25 +289,34 @@ struct ComposeArchiveView: View {
     @ObservedObject var state: ComposeArchiveState
     @ObservedObject var options: CompressionOptions
     @EnvironmentObject var model: AppModel
+    @Environment(\.appTheme) private var theme
 
     private var displayName: String {
         String(format: L("未命名压缩包.%@"), options.format.fileExtension)
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                toolbar
-                Divider()
-                content
-                Divider()
-                bottomBar
+        // 以前这里硬写 minWidth: 900，窗口缩到 760 时内容直接被裁掉、控件互相压住。
+        // 改成按实际宽度收：先藏详情栏，再藏搜索框，按钮永远有位置。
+        GeometryReader { geo in
+            let showDetails = geo.size.width >= 880
+            let showSearch = geo.size.width >= 720
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    toolbar(showSearch: showSearch)
+                    Divider()
+                    content
+                    Divider()
+                    bottomBar
+                }
+                if showDetails {
+                    Divider()
+                    details
+                        .frame(width: 258)
+                }
             }
-            Divider()
-            details
-                .frame(width: 258)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 900, minHeight: 520)
         .background(Color(nsColor: .windowBackgroundColor))
         .dropDestination(for: URL.self) { urls, _ in
             state.add(urls)
@@ -346,60 +355,52 @@ struct ComposeArchiveView: View {
 
     // MARK: - 工具栏
 
-    private var toolbar: some View {
+    private func toolbar(showSearch: Bool) -> some View {
         HStack(spacing: 10) {
-            Button {
+            ThemeIconButton(symbol: "chevron.left", help: L("返回（放弃这份清单）")) {
                 state.deactivate()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 13, weight: .semibold))
             }
-            .buttonStyle(.borderless)
-            .help(L("返回（放弃这份清单）"))
 
             HStack(spacing: 6) {
-                Image(systemName: "doc.zipper")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                ThemeIcon(symbol: "doc.zipper", size: 12, tone: .secondary)
                 Text(displayName)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: theme.barFont, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(Capsule().fill(Color(nsColor: .controlBackgroundColor)))
-            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08)))
+            .frame(maxWidth: 220)
+            .background(Capsule().fill(theme.surface))
+            .overlay(Capsule().strokeBorder(theme.pillBorder))
 
             Spacer(minLength: 8)
 
-            HStack(spacing: 5) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                TextField(L("搜索"), text: $state.searchText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 11.5))
-                if !state.searchText.isEmpty {
-                    Button {
-                        state.searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
+            // 窗口变窄时先收搜索框，保证视图切换和两个主按钮不被挤掉。
+            if showSearch {
+                HStack(spacing: 5) {
+                    ThemeIcon(symbol: "magnifyingglass", size: 11, tone: .secondary)
+                    TextField(L("搜索"), text: $state.searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: theme.barFont))
+                    if !state.searchText.isEmpty {
+                        Button {
+                            state.searchText = ""
+                        } label: {
+                            ThemeIcon(symbol: "xmark.circle.fill", size: 10, tone: .secondary)
+                        }
+                        .buttonStyle(.borderless)
                     }
-                    .buttonStyle(.borderless)
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .frame(width: 150)
+                .themeSurface()
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .frame(width: 150)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color(nsColor: .controlBackgroundColor)))
-            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.primary.opacity(0.08)))
 
             Picker("", selection: $state.layout) {
                 ForEach(ComposeLayout.allCases) { mode in
-                    Image(systemName: mode.symbolName)
+                    ThemeIcon(symbol: mode.symbolName, size: 11)
                         .help(mode.title)
                         .tag(mode)
                 }
@@ -409,42 +410,25 @@ struct ComposeArchiveView: View {
             .frame(width: 112)
             .help(L("切换列表、图标与分栏"))
 
-            Button {
+            ThemeIconButton(
+                symbol: "trash",
+                tone: .danger,
+                filled: !state.selection.isEmpty,
+                isEnabled: !state.selection.isEmpty,
+                help: state.selection.isEmpty ? L("先选中要移除的文件") : L("移除所选")
+            ) {
                 state.removeSelected()
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(state.selection.isEmpty ? Color.secondary : Color.white)
-                    .frame(width: 26, height: 26)
-                    .background(Circle().fill(state.selection.isEmpty
-                                              ? Color(nsColor: .controlBackgroundColor)
-                                              : Color.red))
-                    .overlay(Circle().strokeBorder(Color.primary.opacity(state.selection.isEmpty ? 0.10 : 0)))
             }
-            .buttonStyle(.borderless)
-            .disabled(state.selection.isEmpty)
-            .help(state.selection.isEmpty ? L("先选中要移除的文件") : L("移除所选"))
 
-            Button {
+            PrimaryActionButton(
+                title: L("保存"),
+                symbol: "square.and.arrow.down",
+                compact: true,
+                isEnabled: !state.items.isEmpty,
+                help: state.items.isEmpty ? L("先添加文件，才能保存") : L("下一步设置格式与强度")
+            ) {
                 state.showWizard = true
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "square.and.arrow.down")
-                        .font(.system(size: 11.5, weight: .semibold))
-                    Text(L("保存"))
-                        .font(.system(size: 12, weight: .semibold))
-                }
-                .foregroundStyle(state.items.isEmpty ? Color.secondary : Color.white)
-                .padding(.horizontal, 11)
-                .frame(height: 26)
-                .background(Capsule().fill(state.items.isEmpty
-                                           ? Color(nsColor: .controlBackgroundColor)
-                                           : Color.accentColor))
-                .overlay(Capsule().strokeBorder(Color.primary.opacity(state.items.isEmpty ? 0.10 : 0)))
             }
-            .buttonStyle(.borderless)
-            .disabled(state.items.isEmpty)
-            .help(state.items.isEmpty ? L("先添加文件，才能保存") : L("下一步设置格式与强度"))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -699,57 +683,38 @@ struct ComposeArchiveView: View {
                 ) { model.previewCurrent() }
             }
 
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(state.items.isEmpty
-                         ? L("还没有添加文件")
-                         : String(format: L("%d 项 · 合计 %@"), state.items.count,
-                                  ByteFormatter.string(state.totalSize)))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
-                    if state.selection.count > 1 {
-                        Text(String(format: L("已选 %d 项"), state.selection.count))
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(.secondary)
+            CompactHidden {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(state.items.isEmpty
+                             ? L("还没有添加文件")
+                             : String(format: L("%d 项 · 合计 %@"), state.items.count,
+                                      ByteFormatter.string(state.totalSize)))
+                            .font(.system(size: theme.barFont))
+                            .foregroundStyle(theme.iconSecondary)
+                        if state.selection.count > 1 {
+                            Text(String(format: L("已选 %d 项"), state.selection.count))
+                                .font(.system(size: theme.barFont))
+                                .foregroundStyle(theme.iconSecondary)
+                        }
                     }
-                }
-                .lineLimit(1)
-                if let error = state.errorMessage {
-                    Text(error)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.orange)
-                        .lineLimit(1)
+                    .lineLimit(1)
+                    if let error = state.errorMessage {
+                        Text(error)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(theme.danger)
+                            .lineLimit(1)
+                    }
                 }
             }
         } trailing: {
-            addButton
+            // 与解压页「解压到…」共用同一个主操作组件，两页底栏从此是一套。
+            PrimaryActionButton(
+                title: L("添加文件"),
+                symbol: "plus",
+                help: L("选择要放进压缩包的文件或文件夹")
+            ) { addFiles() }
         }
-    }
-
-    /// 唯一的添加入口：大按钮，平时就在最显眼的位置。
-    private var addButton: some View {
-        Button(action: addFiles) {
-            HStack(spacing: 7) {
-                Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .bold))
-                Text(L("添加文件"))
-                    .font(.system(size: 13, weight: .semibold))
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 24)
-            .frame(height: 34)
-            .background(
-                Capsule().fill(LinearGradient(
-                    colors: [Color(red: 0.62, green: 0.44, blue: 0.99),
-                             Color(red: 0.52, green: 0.33, blue: 0.94)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                ))
-            )
-            .shadow(color: Color.purple.opacity(0.22), radius: 5, y: 2)
-        }
-        .buttonStyle(.plain)
-        .help(L("选择要放进压缩包的文件或文件夹"))
     }
 
     // MARK: - 右侧详情

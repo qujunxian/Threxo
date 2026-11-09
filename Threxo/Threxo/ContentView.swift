@@ -12,6 +12,8 @@ struct ContentView: View {
     @StateObject private var compose = ComposeArchiveState.shared
     @StateObject private var browser = BrowserState()
     @ObservedObject private var options = CompressionOptions.shared
+    /// 主题在这里注入一次，下面所有按钮 / 图标都从 Environment 取值。
+    @ObservedObject private var themeStore = ThemeStore.shared
 
     var body: some View {
         Group {
@@ -37,6 +39,7 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 760, minHeight: 480)
+        .appTheme(themeStore.theme)
         .onAppear { model.refreshFinderExtensionState() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.refreshFinderExtensionState()
@@ -92,27 +95,21 @@ struct ContentView: View {
         HStack(spacing: 10) {
             // 看的是内层包时，标题左侧给一条回外层的路。
             if model.isNestedArchive {
-                Button {
+                ThemeIconButton(symbol: "chevron.left", help: L("返回外层压缩包")) {
                     model.closeNestedArchive()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                        .background(Circle().fill(Color(nsColor: .controlBackgroundColor)))
-                        .overlay(Circle().strokeBorder(Color.primary.opacity(0.10)))
                 }
-                .buttonStyle(.borderless)
-                .help(L("返回外层压缩包"))
             }
 
-            Image(systemName: "archivebox")
-                .font(.system(size: 19))
-                .foregroundStyle(.tint)
+            ThemeIcon(symbol: "archivebox", size: 19, weight: .regular, tone: .accent)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 5) {
                     if model.isNestedArchive {
                         // 祖先层做成熟链接：点哪一层就退到哪一层。
-                        let ancestors = Array(model.archiveBreadcrumb.dropLast().enumerated())
+                        // 层数太深时只留「最外层 + 上一层」，免得窄窗口下面包屑把标题挤出屏幕。
+                        let crumbs = Array(model.archiveBreadcrumb.dropLast().enumerated())
+                        let ancestors = crumbs.count > 2
+                            ? Array(crumbs.prefix(1)) + Array(crumbs.suffix(1))
+                            : crumbs
                         ForEach(ancestors, id: \.offset) { index, name in
                             Button {
                                 model.popNestedArchives(keeping: index)
@@ -143,6 +140,8 @@ struct ContentView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
+            // 窄窗口时给标题封顶，长文件名 / 多层面包屑不会把右侧内容顶出去。
+            .frame(maxWidth: 560, alignment: .leading)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
@@ -196,8 +195,8 @@ struct ContentView: View {
     /// 区域），所以在列表外面留一个稳定可用的落点。
     private var hintBar: some View {
         HStack(spacing: 6) {
-            Image(systemName: "hand.draw")
-                .font(.system(size: 10))
+            ThemeIcon(symbol: "hand.draw", size: 10,
+                      tone: drop.isTargeted ? .accent : .secondary)
             Text("把条目拖到访达即解压 · 把文件拖进来就加进这个归档")
                 .font(.caption2)
             Spacer()
@@ -288,35 +287,41 @@ struct ContentView: View {
             }
             HStack {
                 Spacer()
-                Button {
+                ThemeIconButton(symbol: "gearshape", help: L("设置")) {
                     SettingsWindowController.shared.show()
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 15))
-                        .frame(width: 28, height: 28)
-                        .background(Circle().fill(Color(nsColor: .controlBackgroundColor)))
-                        .overlay(Circle().strokeBorder(Color.primary.opacity(0.10)))
                 }
-                .buttonStyle(.borderless)
-                .help(L("设置"))
             }
         }
     }
 
-    /// 扩展没启用时给一行小字，不占掉欢迎态的留白。
+    /// 扩展 / 格式关联没配好时给一行小字，不占掉欢迎态的留白。
+    /// 「双击压缩包没反应」多半是格式没交给千梭，这里直接把原因摆出来。
     @ViewBuilder
     private var emptyFootnote: some View {
-        if !model.finderExtensionEnabled {
-            HStack(spacing: 6) {
-                Image(systemName: "hand.point.up.left")
-                    .font(.system(size: 10))
-                Text(L("访达右键菜单还没启用"))
-                    .font(.system(size: 10.5))
-                Button(L("前往设置")) { model.openExtensionSettings() }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
+        VStack(spacing: 5) {
+            if model.unassociatedCommonCount > 0 {
+                HStack(spacing: 6) {
+                    ThemeIcon(symbol: "exclamationmark.triangle", size: 10, tone: .danger)
+                    Text(String(format: L("还有 %d 种常用格式没交给千梭，双击可能没反应"),
+                                model.unassociatedCommonCount))
+                        .font(.system(size: 10.5))
+                    Button(L("去关联")) { SettingsWindowController.shared.show(page: .formats) }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                }
+                .foregroundStyle(.secondary)
             }
-            .foregroundStyle(.secondary)
+            if !model.finderExtensionEnabled {
+                HStack(spacing: 6) {
+                    ThemeIcon(symbol: "hand.point.up.left", size: 10, tone: .secondary)
+                    Text(L("访达右键菜单还没启用"))
+                        .font(.system(size: 10.5))
+                    Button(L("前往设置")) { model.openExtensionSettings() }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                }
+                .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -350,7 +355,8 @@ struct ContentView: View {
                 .padding(.horizontal, 14)
                 .padding(.bottom, 8)
             } else if model.archiveURL != nil {
-                // 解压页的底栏：Mini（占位）→ 全部解压 → 预览，右侧是「解压到…」。
+                // 解压页的底栏：动作胶囊 + 状态，右侧放与压缩页同源的主操作按钮。
+                // 以前「解压到…」是个孤零零的系统灰按钮，和左边胶囊完全不像一套。
                 ActionBar {
                     ActionPill {
                         ActionButton(
@@ -376,10 +382,14 @@ struct ContentView: View {
                                 : L("选中一个文件后就能预览")
                         ) { model.previewCurrent() }
                     }
-                    statusLabel
+                    CompactHidden { statusLabel }
                 } trailing: {
-                    Button(L("解压到…")) { model.extractChoosingDestination() }
-                        .disabled(model.entries.isEmpty)
+                    PrimaryActionButton(
+                        title: L("解压到…"),
+                        symbol: "folder",
+                        isEnabled: !model.entries.isEmpty,
+                        help: L("自己挑选解压位置（⇧⌘E）")
+                    ) { model.extractChoosingDestination() }
                 }
             } else {
                 HStack(spacing: 8) {
@@ -397,8 +407,7 @@ struct ContentView: View {
         // 启动错误优先：压缩引擎不可用时，其他提示都没有意义。
         if let startup = model.startupError {
             HStack(spacing: 6) {
-                Image(systemName: "exclamationmark.octagon.fill")
-                    .foregroundStyle(.red)
+                ThemeIcon(symbol: "exclamationmark.octagon.fill", size: 12, tone: .danger)
                 Text(startup)
                     .font(.caption)
                     .foregroundStyle(.red)
@@ -406,8 +415,7 @@ struct ContentView: View {
             }
         } else if let error = model.errorMessage {
             HStack(spacing: 6) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                ThemeIcon(symbol: "exclamationmark.triangle.fill", size: 12, tone: .danger)
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(.red)

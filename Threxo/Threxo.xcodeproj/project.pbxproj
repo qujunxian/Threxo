@@ -34,6 +34,7 @@
 		AA0000000000000000000098 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000099 /* OnboardingView.swift */; };
 		AA00000000000000000000A0 /* ComposeArchiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A1 /* ComposeArchiveView.swift */; };
 		AA00000000000000000000A2 /* ActionBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A3 /* ActionBar.swift */; };
+		AA00000000000000000000A4 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A5 /* Theme.swift */; };
 		AA0000000000000000000088 /* CompressWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000087 /* CompressWizardView.swift */; };
 		AA0000000000000000000090 /* BrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000091 /* BrowserView.swift */; };
 		AA0000000000000000000092 /* MultiDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000093 /* MultiDrag.swift */; };
@@ -102,6 +103,7 @@
 		AA0000000000000000000099 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		AA00000000000000000000A1 /* ComposeArchiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeArchiveView.swift; sourceTree = "<group>"; };
 		AA00000000000000000000A3 /* ActionBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionBar.swift; sourceTree = "<group>"; };
+		AA00000000000000000000A5 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		AA0000000000000000000087 /* CompressWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompressWizardView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000091 /* BrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000093 /* MultiDrag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/MultiDrag.swift"; sourceTree = "<group>"; };
@@ -158,6 +160,7 @@
 				AA0000000000000000000099 /* OnboardingView.swift */,
 				AA00000000000000000000A1 /* ComposeArchiveView.swift */,
 				AA00000000000000000000A3 /* ActionBar.swift */,
+				AA00000000000000000000A5 /* Theme.swift */,
 			);
 			path = Threxo;
 			sourceTree = "<group>";
@@ -363,6 +366,7 @@
 				AA0000000000000000000098 /* OnboardingView.swift in Sources */,
 				AA00000000000000000000A0 /* ComposeArchiveView.swift in Sources */,
 				AA00000000000000000000A2 /* ActionBar.swift in Sources */,
+				AA00000000000000000000A4 /* Theme.swift in Sources */,
 				AA0000000000000000000054 /* CompressionOptions.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -489,7 +493,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = T9DDF2YTVH;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -513,7 +517,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = T9DDF2YTVH;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -537,7 +541,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = T9DDF2YTVH;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -562,7 +566,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = T9DDF2YTVH;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;

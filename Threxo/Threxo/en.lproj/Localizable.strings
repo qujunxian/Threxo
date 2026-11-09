@@ -682,8 +682,13 @@
 "打开内嵌压缩包失败" = "Couldn't open the nested archive";
 "这个内嵌压缩包打不开，可能加密了或者文件不完整" = "This nested archive can't be opened — it may be encrypted or incomplete";
 
-"内嵌于 %" = "Inside %";
+"内嵌于 %@" = "Inside %@";
 
 /* ===== 嵌套面包屑 / ⌘↑（2026-11-09）===== */
 "返回 %@" = "Back to %@";
 "内嵌包 · %d 个文件 · 解压后 %@" = "Nested · %d files · %@ uncompressed";
+
+/* ===== 主题化底栏与格式关联提示（2026-11-09）===== */
+"自己挑选解压位置（⇧⌘E）" = "Choose where to extract (⇧⌘E)";
+"还有 %d 种常用格式没交给千梭，双击可能没反应" = "%d common formats aren't assigned to Threxo yet — double-clicking them may do nothing";
+"去关联" = "Assign";
