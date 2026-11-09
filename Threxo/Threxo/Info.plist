@@ -55,7 +55,13 @@
 				<string>public.bzip2-archive</string>
 				<string>org.bzip.bzip2-tar-archive</string>
 				<string>org.tukaani.xz-archive</string>
-				<string>public.archive</string>
+				<string>com.apple.disk-image-udif</string>
+				<string>public.iso-image</string>
+				<string>com.microsoft.cab</string>
+				<string>public.cpio-archive</string>
+				<string>com.apple.xar-archive</string>
+				<string>public.z-archive</string>
+				<string>com.sun.java-archive</string>
 			</array>
 		</dict>
 	</array>

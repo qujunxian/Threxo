@@ -24,9 +24,24 @@ struct PasswordSheet: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            SecureField(L("密码"), text: $state.text)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit { submit() }
+            HStack(spacing: 6) {
+                if state.revealed {
+                    TextField(L("密码"), text: $state.text)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { submit() }
+                } else {
+                    SecureField(L("密码"), text: $state.text)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { submit() }
+                }
+                Button {
+                    state.revealed.toggle()
+                } label: {
+                    Image(systemName: state.revealed ? "eye.slash" : "eye")
+                }
+                .buttonStyle(.borderless)
+                .help(state.revealed ? L("隐藏密码") : L("显示密码"))
+            }
 
             HStack {
                 Spacer()
@@ -50,4 +65,5 @@ struct PasswordSheet: View {
 
 final class PasswordFieldState: ObservableObject {
     @Published var text = ""
+    @Published var revealed: Bool = SettingsStore.shared.showPasswordByDefault
 }

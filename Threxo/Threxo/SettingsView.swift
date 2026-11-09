@@ -1,6 +1,8 @@
 import SwiftUI
 import AppKit
 import Combine
+import LocalAuthentication
+import FinderSync
 
 // MARK: - 页面与导航
 
@@ -8,6 +10,8 @@ enum SettingsPage: String, CaseIterable, Identifiable {
     case general
     case compress
     case extract
+    case vault
+    case mini
     case formats
     case advanced
     case about
@@ -19,6 +23,8 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .general: return L("通用")
         case .compress: return L("压缩")
         case .extract: return L("解压")
+        case .vault: return L("密码本")
+        case .mini: return L("Mini")
         case .formats: return L("格式关联")
         case .advanced: return L("高级")
         case .about: return L("关于")
@@ -30,6 +36,8 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .general: return "gearshape"
         case .compress: return "archivebox"
         case .extract: return "arrow.down.doc"
+        case .vault: return "key"
+        case .mini: return "macwindow"
         case .formats: return "link"
         case .advanced: return "slider.horizontal.3"
         case .about: return "info.circle"
@@ -160,6 +168,8 @@ struct SettingsRootView: View {
         case .general: GeneralSettingsPage(store: store)
         case .compress: CompressSettingsPage(store: store, options: options)
         case .extract: ExtractSettingsPage(store: store)
+        case .vault: VaultSettingsPage(store: store)
+        case .mini: MiniSettingsPage(store: store)
         case .formats: FormatSettingsPage(store: store)
         case .advanced: AdvancedSettingsPage(store: store)
         case .about: AboutSettingsPage(store: store)
@@ -214,7 +224,46 @@ private struct GeneralSettingsPage: View {
                 }
             }
 
+            Card(L("语言")) {
+                Row(L("应用语言"), subtitle: L("改完重启千梭生效")) {
+                    Picker("", selection: $store.language) {
+                        ForEach(SettingsStore.LanguageMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 160)
+                }
+            }
+
+            Card(L("密码输入")) {
+                Row(L("默认显示密码"), subtitle: L("密码框直接显示明文，可随时切换回隐藏")) {
+                    Toggle("", isOn: $store.showPasswordByDefault)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+            }
+
+            Card(L("处理器使用")) {
+                Row(L("最大可用核心数"), subtitle: L("限制 7-Zip 的线程数，压大包时给别的程序留点余力")) {
+                    Picker("", selection: $store.maxThreads) {
+                        Text(L("全部可用")).tag(0)
+                        Text("2").tag(2)
+                        Text("4").tag(4)
+                        Text("8").tag(8)
+                    }
+                    .labelsHidden()
+                    .frame(width: 130)
+                }
+            }
+
             Card(L("访达扩展")) {
+                Row(L("在移动存储中开启右键菜单"), subtitle: L("把外接硬盘、U 盘也纳入访达扩展的监视范围")) {
+                    Toggle("", isOn: $store.finderMenuOnExternalVolumes)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+                Divider().padding(.leading, 14)
                 Row(
                     extensionState.enabled ? L("右键菜单已启用") : L("右键菜单未启用"),
                     subtitle: extensionState.enabled
@@ -361,6 +410,65 @@ private struct CompressSettingsPage: View {
                 .opacity(options.format.supportsLevel ? 1 : 0.5)
             }
 
+            Card(L("默认用途")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        ForEach(CompressionPurpose.allCases) { purpose in
+                            Button {
+                                options.apply(purpose)
+                            } label: {
+                                Text(purpose.title)
+                                    .font(.system(size: 10.5))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 5)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(options.matchingPurpose == purpose
+                                                  ? Color.accentColor.opacity(0.18) : Color.clear)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .strokeBorder(options.matchingPurpose == purpose
+                                                          ? Color.accentColor : Color.primary.opacity(0.12))
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    Text(L("用途只是一组格式与强度的预设，改了下面任何一项就会显示成「自定义」。"))
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 10)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Card(L("分卷压缩")) {
+                Row(L("默认创建分卷压缩包"), subtitle: L("只对 ZIP 与 7Z 有效，访达右键压缩始终不分卷")) {
+                    Toggle("", isOn: Binding(
+                        get: { options.volumeSize != .none },
+                        set: { options.volumeSize = $0 ? .mb100 : .none }
+                    ))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                }
+                Divider().padding(.leading, 14)
+                Row(L("每卷大小")) {
+                    Picker("", selection: $options.volumeSize) {
+                        ForEach(VolumeSize.allCases.filter { $0 != .none }) { size in
+                            Text(size.title).tag(size)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 150)
+                    .disabled(options.volumeSize == .none)
+                }
+            }
+
             Card(L("内容")) {
                 Row(L("排除 macOS 辅助文件"), subtitle: L("不打包 __MACOSX、.DS_Store、._* 这类文件")) {
                     Toggle("", isOn: $options.excludeMacResources)
@@ -474,6 +582,209 @@ private struct ExtractSettingsPage: View {
     }
 }
 
+// MARK: - 密码本
+
+/// 页面状态单独放 ObservableObject：这个工程里 @State 宏在命令行构建时会被拦。
+final class VaultPageState: ObservableObject {
+    @Published var locked = false
+    @Published var revealed: Set<String> = []
+    @Published var authError: String?
+}
+
+private struct VaultSettingsPage: View {
+    @ObservedObject var store: SettingsStore
+    @StateObject private var vault = PasswordVault.shared
+    @StateObject private var state = VaultPageState()
+
+    private var needsUnlock: Bool { store.vaultRequireAuth && state.locked }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Card(L("自动保存")) {
+                Row(L("自动保存到密码本"), subtitle: L("成功解压或创建加密包后，记下这次用的密码")) {
+                    Toggle("", isOn: $store.vaultAutoSave).toggleStyle(.switch).labelsHidden()
+                }
+                Divider().padding(.leading, 14)
+                Row(L("自动使用密码本解锁"), subtitle: L("打开加密包时先试一遍已保存的密码，试不出来再问")) {
+                    Toggle("", isOn: $store.vaultAutoTry).toggleStyle(.switch).labelsHidden()
+                }
+            }
+
+            Card(L("安全")) {
+                Row(L("查看密码本需要认证"), subtitle: L("用 Touch ID 或系统密码解锁后才能看到明文")) {
+                    Toggle("", isOn: $store.vaultRequireAuth).toggleStyle(.switch).labelsHidden()
+                }
+            }
+
+            Card(L("已保存的密码")) {
+                if needsUnlock {
+                    HStack(spacing: 10) {
+                        Image(systemName: "lock.fill").foregroundStyle(.orange)
+                        Text(L("密码本已锁定")).font(.system(size: 12))
+                        Spacer()
+                        Button(L("解锁…")) { unlock() }.controlSize(.small)
+                    }
+                    .padding(14)
+                    if let error = state.authError {
+                        Text(error).font(.system(size: 10.5)).foregroundStyle(.red)
+                            .padding(.horizontal, 14).padding(.bottom, 10)
+                    }
+                } else {
+                    if vault.entries.isEmpty {
+                        Row(L("还没有保存的密码"),
+                            subtitle: L("手动加一条，或者打开上面的自动保存")) {
+                            Button(L("添加密码…")) { addEntry() }.controlSize(.small)
+                        }
+                    } else {
+                        ForEach(Array(vault.entries.enumerated()), id: \.element.id) { index, item in
+                            if index > 0 { Divider().padding(.leading, 14) }
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.name).font(.system(size: 12.5))
+                                    Text(item.note.isEmpty ? L("按归档名匹配") : item.note)
+                                        .font(.system(size: 10.5)).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 8)
+                                Text(state.revealed.contains(item.name) ? item.password : "••••••••")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                Button(state.revealed.contains(item.name) ? L("隐藏") : L("显示")) {
+                                    if state.revealed.contains(item.name) {
+                                        state.revealed.remove(item.name)
+                                    } else {
+                                        state.revealed.insert(item.name)
+                                    }
+                                }
+                                .controlSize(.small)
+                                Button(L("删除")) { removeEntry(item.name) }
+                                    .controlSize(.small)
+                                    .foregroundStyle(.red)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                        }
+                        Divider().padding(.leading, 14)
+                        HStack {
+                            Spacer()
+                            Button(L("添加密码…")) { addEntry() }.controlSize(.small)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                    }
+                }
+            }
+
+            if let error = vault.lastError {
+                Text(error).font(.system(size: 11)).foregroundStyle(.red)
+            }
+
+            Text(L("密码存在系统钥匙串里，不写进配置文件；卸载 App 后可以在「钥匙串访问」里删掉。"))
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .onAppear {
+            vault.reload()
+            if store.vaultRequireAuth { state.locked = true }
+        }
+        .onChange(of: store.vaultRequireAuth) { enabled in
+            state.locked = enabled
+            state.revealed = []
+        }
+    }
+
+    private func unlock() {
+        state.authError = nil
+        let context = LAContext()
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
+            state.authError = error?.localizedDescription ?? L("这台 Mac 不支持解锁认证")
+            return
+        }
+        context.evaluatePolicy(.deviceOwnerAuthentication,
+                               localizedReason: L("解锁千梭密码本")) { ok, failure in
+            DispatchQueue.main.async {
+                if ok {
+                    state.locked = false
+                } else {
+                    state.authError = failure?.localizedDescription ?? L("认证没通过")
+                }
+            }
+        }
+    }
+
+    private func addEntry() {
+        let alert = NSAlert()
+        alert.messageText = L("添加密码")
+        alert.informativeText = L("名字可以写归档文件名，也可以写个好记的备注。")
+        alert.addButton(withTitle: L("保存"))
+        alert.addButton(withTitle: L("取消"))
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 96))
+        let name = NSTextField(frame: NSRect(x: 0, y: 72, width: 280, height: 24))
+        name.placeholderString = L("归档名，例如 报告.zip")
+        let passwordField: NSTextField = SettingsStore.shared.showPasswordByDefault
+            ? NSTextField(frame: NSRect(x: 0, y: 40, width: 280, height: 24))
+            : NSSecureTextField(frame: NSRect(x: 0, y: 40, width: 280, height: 24))
+        passwordField.placeholderString = L("密码")
+        let note = NSTextField(frame: NSRect(x: 0, y: 8, width: 280, height: 24))
+        note.placeholderString = L("备注（可留空）")
+        container.addSubview(name)
+        container.addSubview(passwordField)
+        container.addSubview(note)
+        alert.accessoryView = container
+        alert.window.initialFirstResponder = name
+        alert.window.level = .floating
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let trimmed = name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !passwordField.stringValue.isEmpty else { return }
+        vault.upsert(name: trimmed, password: passwordField.stringValue,
+                     note: note.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private func removeEntry(_ name: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = String(format: L("删掉「%@」这条密码？"), name)
+        alert.informativeText = L("只是从密码本移除，不会改动压缩包。")
+        alert.addButton(withTitle: L("取消"))
+        alert.addButton(withTitle: L("删除"))
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        state.revealed.remove(name)
+        vault.remove(name: name)
+    }
+}
+
+// MARK: - Mini
+
+private struct MiniSettingsPage: View {
+    @ObservedObject var store: SettingsStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Card(L("打开方式与外观")) {
+                Row(L("默认用 Mini 打开"), subtitle: L("从访达打开压缩包时优先用精简窗口")) {
+                    Toggle("", isOn: $store.miniDefaultOpen).toggleStyle(.switch).labelsHidden()
+                }
+                Divider().padding(.leading, 14)
+                Row(L("使用毛玻璃材质"), subtitle: L("关掉后用不透明的普通窗口背景")) {
+                    Toggle("", isOn: $store.miniGlassMaterial).toggleStyle(.switch).labelsHidden()
+                }
+                Divider().padding(.leading, 14)
+                Row(L("使用彩色窗口控制按钮"), subtitle: L("关掉后只保留系统默认的灰度按钮")) {
+                    Toggle("", isOn: $store.miniColoredControls).toggleStyle(.switch).labelsHidden()
+                }
+            }
+
+            Text(L("Mini 窗口形态还在开发，这几项现在会记住，形态上线后直接生效。"))
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 // MARK: - 格式关联
 
 private struct FormatSettingsPage: View {
@@ -490,34 +801,69 @@ private struct FormatSettingsPage: View {
                 Text(String(format: L("已关联 %d / %d"), boundCount, state.bindings.count))
                     .font(.system(size: 12.5))
                 Spacer()
-                Button(L("刷新")) { state.refresh() }
+                Button(L("使用推荐设置")) { state.useRecommended() }
                     .controlSize(.small)
-                Button(L("打开系统设置")) { AppModel.shared.openExtensionSettings() }
+                Button(L("刷新")) { state.refresh() }
                     .controlSize(.small)
             }
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 9).fill(Color(nsColor: .controlBackgroundColor)))
 
-            Card(nil) {
-                ForEach(Array(state.bindings.enumerated()), id: \.element.id) { index, item in
-                    if index > 0 { Divider().padding(.leading, 14) }
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.name).font(.system(size: 12.5))
-                            Text(item.extensions).font(.system(size: 10.5)).foregroundStyle(.secondary)
+            if let message = state.message {
+                Text(message).font(.system(size: 11)).foregroundStyle(.red)
+            }
+
+            ForEach(SettingsStore.formatGroups, id: \.self) { group in
+                let items = state.bindings.filter { $0.group == group }
+                if !items.isEmpty {
+                    Card(group) {
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                            if index > 0 { Divider().padding(.leading, 14) }
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 5) {
+                                        Text(item.name).font(.system(size: 12.5))
+                                        if item.cautious {
+                                            Text(L("谨慎"))
+                                                .font(.system(size: 9))
+                                                .padding(.horizontal, 5)
+                                                .padding(.vertical, 1)
+                                                .background(Capsule().fill(Color.orange.opacity(0.18)))
+                                                .foregroundStyle(.orange)
+                                        }
+                                    }
+                                    Text(item.extensions)
+                                        .font(.system(size: 10.5)).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 8)
+                                if item.uti == nil {
+                                    Text(L("系统未登记"))
+                                        .font(.system(size: 10.5)).foregroundStyle(.secondary)
+                                } else {
+                                    HStack(spacing: 6) {
+                                        if state.pending.contains(item.id) {
+                                            ProgressView()
+                                                .controlSize(.small)
+                                        }
+                                        Toggle("", isOn: Binding(
+                                            get: { item.isDefault },
+                                            set: { state.set(item, enabled: $0) }
+                                        ))
+                                        .toggleStyle(.switch)
+                                        .labelsHidden()
+                                        .disabled(state.pending.contains(item.id))
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
                         }
-                        Spacer()
-                        Text(item.isDefault ? L("千梭") : L("其他应用"))
-                            .font(.system(size: 11))
-                            .foregroundStyle(item.isDefault ? Color.accentColor : Color.secondary)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
                 }
             }
 
-            Text(L("这一页只反映当前状态。要改默认打开方式，到系统设置的「桌面与程序坞」里改；逐个开关的切换能力排在后续版本。"))
-                .font(.system(size: 11))
+            Text(L("关闭开关会还原成接管之前那个默认程序。JAR、DMG 这类格式交给千梭后，双击不再是启动或挂载，打开前会再问一次。"))
+                .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -527,9 +873,63 @@ private struct FormatSettingsPage: View {
 
 final class FormatBindingState: ObservableObject {
     @Published var bindings: [SettingsStore.FormatBinding] = []
+    @Published var message: String?
+    /// 正在等系统确认的格式。macOS 改默认程序可能弹一次授权框。
+    @Published var pending: Set<String> = []
 
     func refresh() {
         bindings = SettingsStore.shared.currentFormatBindings()
+    }
+
+    func set(_ item: SettingsStore.FormatBinding, enabled: Bool) {
+        message = nil
+        guard !pending.contains(item.id) else { return }
+        if enabled, item.cautious, !confirmCautious(item) { return }
+        pending.insert(item.id)
+        let id = item.id
+        Task { @MainActor in
+            if let error = await SettingsStore.shared.setFormatBinding(item, enabled: enabled) {
+                message = error
+            }
+            pending.remove(id)
+            refresh()
+        }
+        // macOS 可能弹「允许更改默认应用吗」的确认框；没人在时别让开关永远转圈。
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            guard pending.contains(id) else { return }
+            pending.remove(id)
+            message = L("系统可能弹了确认框，请在弹窗里允许更改默认程序后再试一次。")
+            refresh()
+        }
+    }
+
+    func useRecommended() {
+        message = nil
+        Task { @MainActor in
+            let common = SettingsStore.formatGroups[0]
+            for item in bindings {
+                let wanted = item.group == common && item.uti != nil
+                guard item.isDefault != wanted else { continue }
+                if let error = await SettingsStore.shared.setFormatBinding(item, enabled: wanted) {
+                    message = error
+                    break
+                }
+            }
+            refresh()
+        }
+    }
+
+    private func confirmCautious(_ item: SettingsStore.FormatBinding) -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = String(format: L("把 %@ 交给千梭？"), item.name)
+        alert.informativeText = L("接管后双击这类文件会变成打开压缩包内容；原本的启动、挂载或安装行为会变。随时可以回来关掉开关还原。")
+        alert.addButton(withTitle: L("取消"))
+        alert.addButton(withTitle: L("仍然关联"))
+        alert.window.level = .floating
+        return alert.runModal() == .alertSecondButtonReturn
     }
 }
 

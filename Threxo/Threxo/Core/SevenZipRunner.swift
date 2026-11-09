@@ -53,6 +53,16 @@ final class SevenZipRunner {
         self.executableURL = executableURL
     }
 
+    /// 设置里限制了核心数时，给所有 7zz 命令补上 `-mmt=N`。
+    /// 插在子命令后面，7zz 对 `l` / `t` 这类只读命令会直接忽略它。
+    private func effectiveArguments(_ arguments: [String]) -> [String] {
+        let limit = SettingsStore.shared.maxThreads
+        guard limit > 0, !arguments.isEmpty else { return arguments }
+        var args = arguments
+        args.insert("-mmt=\(limit)", at: 1)
+        return args
+    }
+
     func start(
         arguments: [String],
         workingDirectory: URL? = nil,
@@ -62,7 +72,7 @@ final class SevenZipRunner {
     ) throws -> Process {
         let process = Process()
         process.executableURL = executableURL
-        process.arguments = arguments
+        process.arguments = effectiveArguments(arguments)
         process.currentDirectoryURL = workingDirectory
         // 7-Zip 会把密码提示写到终端并**一直等输入**；没有终端时就是无限挂起。
         // 统一接 /dev/null：真需要密码时让它尽快失败，而不是把界面卡在转圈上。
@@ -147,7 +157,7 @@ final class SevenZipRunner {
     ) throws -> (code: Int32, output: String, error: String) {
         let process = Process()
         process.executableURL = executableURL
-        process.arguments = arguments
+        process.arguments = effectiveArguments(arguments)
         process.currentDirectoryURL = workingDirectory
         process.standardInput = FileHandle.nullDevice
 

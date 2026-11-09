@@ -3,6 +3,8 @@ import AppKit
 import Combine
 import CoreServices
 import ServiceManagement
+import FinderSync
+import UniformTypeIdentifiers
 
 /// 全局设置。所有可配置项集中在这里，读写 UserDefaults，改动立刻广播给界面。
 ///
@@ -35,6 +37,33 @@ final class SettingsStore: ObservableObject {
             case .light: return NSAppearance(named: .aqua)
             case .dark: return NSAppearance(named: .darkAqua)
             }
+        }
+    }
+
+    enum LanguageMode: String, CaseIterable, Identifiable {
+        case system
+        case zhHans = "zh-Hans"
+        case english = "en"
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .system: return L("跟随系统")
+            case .zhHans: return L("简体中文")
+            case .english: return L("English")
+            }
+        }
+
+        /// 写入系统语言覆盖后要重启 App 才会重新加载 .strings。
+        func apply() {
+            let defaults = UserDefaults.standard
+            switch self {
+            case .system: defaults.removeObject(forKey: "AppleLanguages")
+            case .zhHans: defaults.set(["zh-Hans"], forKey: "AppleLanguages")
+            case .english: defaults.set(["en"], forKey: "AppleLanguages")
+            }
+            defaults.synchronize()
         }
     }
 
@@ -125,6 +154,16 @@ final class SettingsStore: ObservableObject {
         static let filterSystemAux = "threxo.settings.filterSystemAux"
         static let filterDMGAux = "threxo.settings.filterDMGAux"
         static let quickExtract = "threxo.settings.quickExtractOnDoubleClick"
+        static let language = "threxo.settings.language"
+        static let showPasswordByDefault = "threxo.settings.showPasswordByDefault"
+        static let maxThreads = "threxo.settings.maxThreads"
+        static let finderExternalVolumes = "threxo.settings.finderExternalVolumes"
+        static let miniDefaultOpen = "threxo.settings.miniDefaultOpen"
+        static let miniGlass = "threxo.settings.miniGlass"
+        static let miniColoredControls = "threxo.settings.miniColoredControls"
+        static let vaultAutoSave = "threxo.settings.vaultAutoSave"
+        static let vaultAutoTry = "threxo.settings.vaultAutoTry"
+        static let vaultRequireAuth = "threxo.settings.vaultRequireAuth"
     }
 
     private let defaults: UserDefaults
@@ -194,6 +233,64 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(quickExtractOnDoubleClick, forKey: Key.quickExtract) }
     }
 
+    // MARK: - 通用补充
+
+    @Published var language: LanguageMode {
+        didSet {
+            defaults.set(language.rawValue, forKey: Key.language)
+            language.apply()
+        }
+    }
+
+    /// 密码框默认明文显示；关掉时用安全输入框。
+    @Published var showPasswordByDefault: Bool {
+        didSet { defaults.set(showPasswordByDefault, forKey: Key.showPasswordByDefault) }
+    }
+
+    /// 7zz 的 `-mmt` 上限。0 表示不限制，交给 7-Zip 自己用满所有核心。
+    @Published var maxThreads: Int {
+        didSet { defaults.set(maxThreads, forKey: Key.maxThreads) }
+    }
+
+    /// 是否把 /Volumes 也交给访达扩展监视（外接盘右键菜单）。
+    @Published var finderMenuOnExternalVolumes: Bool {
+        didSet {
+            defaults.set(finderMenuOnExternalVolumes, forKey: Key.finderExternalVolumes)
+            Self.applyFinderDirectories(finderMenuOnExternalVolumes)
+        }
+    }
+
+    /// 访达扩展监视的目录。关掉外接盘时只监视根卷。
+    static func applyFinderDirectories(_ includeVolumes: Bool) {
+        var urls: Set<URL> = [URL(fileURLWithPath: "/")]
+        if includeVolumes { urls.insert(URL(fileURLWithPath: "/Volumes")) }
+        FIFinderSyncController.default().directoryURLs = urls
+    }
+
+    // MARK: - Mini
+
+    @Published var miniDefaultOpen: Bool {
+        didSet { defaults.set(miniDefaultOpen, forKey: Key.miniDefaultOpen) }
+    }
+    @Published var miniGlassMaterial: Bool {
+        didSet { defaults.set(miniGlassMaterial, forKey: Key.miniGlass) }
+    }
+    @Published var miniColoredControls: Bool {
+        didSet { defaults.set(miniColoredControls, forKey: Key.miniColoredControls) }
+    }
+
+    // MARK: - 密码本
+
+    @Published var vaultAutoSave: Bool {
+        didSet { defaults.set(vaultAutoSave, forKey: Key.vaultAutoSave) }
+    }
+    @Published var vaultAutoTry: Bool {
+        didSet { defaults.set(vaultAutoTry, forKey: Key.vaultAutoTry) }
+    }
+    @Published var vaultRequireAuth: Bool {
+        didSet { defaults.set(vaultRequireAuth, forKey: Key.vaultRequireAuth) }
+    }
+
     /// 上一次手动选择过的解压目标目录，用于「上次使用的位置」。
     var lastExtractDirectory: URL? {
         get {
@@ -227,6 +324,17 @@ final class SettingsStore: ObservableObject {
         filterSystemAux = defaults.object(forKey: Key.filterSystemAux) as? Bool ?? true
         filterDMGAux = defaults.object(forKey: Key.filterDMGAux) as? Bool ?? true
         quickExtractOnDoubleClick = defaults.object(forKey: Key.quickExtract) as? Bool ?? false
+
+        language = Self.read(defaults, Key.language, .system)
+        showPasswordByDefault = defaults.object(forKey: Key.showPasswordByDefault) as? Bool ?? false
+        maxThreads = defaults.object(forKey: Key.maxThreads) as? Int ?? 0
+        finderMenuOnExternalVolumes = defaults.object(forKey: Key.finderExternalVolumes) as? Bool ?? true
+        miniDefaultOpen = defaults.object(forKey: Key.miniDefaultOpen) as? Bool ?? false
+        miniGlassMaterial = defaults.object(forKey: Key.miniGlass) as? Bool ?? true
+        miniColoredControls = defaults.object(forKey: Key.miniColoredControls) as? Bool ?? false
+        vaultAutoSave = defaults.object(forKey: Key.vaultAutoSave) as? Bool ?? false
+        vaultAutoTry = defaults.object(forKey: Key.vaultAutoTry) as? Bool ?? false
+        vaultRequireAuth = defaults.object(forKey: Key.vaultRequireAuth) as? Bool ?? false
     }
 
     private static func read<T: RawRepresentable>(
@@ -355,48 +463,137 @@ final class SettingsStore: ObservableObject {
         filterSystemAux = true
         filterDMGAux = true
         quickExtractOnDoubleClick = false
+        language = .system
+        showPasswordByDefault = false
+        maxThreads = 0
+        finderMenuOnExternalVolumes = true
+        miniDefaultOpen = false
+        miniGlassMaterial = true
+        miniColoredControls = false
+        vaultAutoSave = false
+        vaultAutoTry = false
+        vaultRequireAuth = false
 
         CompressionOptions.shared.resetToDefaults()
         applyAppearance()
     }
 
-    // MARK: - 格式关联（只读查询）
+    // MARK: - 格式关联
 
-    struct FormatBinding: Identifiable {
+    struct FormatBinding: Identifiable, Equatable {
         let id: String
         let name: String
         let extensions: String
-        let contentType: String
+        let group: String
+        let primaryExtension: String
+        /// 双击会执行或被别的工具占用的格式，打开前先说明后果。
+        let cautious: Bool
+        /// 系统为该后缀登记的 UTI。nil 表示系统不认识，没法单独改默认程序。
+        let uti: String?
 
         var isDefault: Bool
     }
 
-    /// Info.plist 里声明的归档类型，配上「当前系统里是不是千梭在默认打开」。
+    static let formatGroups = [
+        L("常用压缩包"), L("单文件压缩"), L("磁盘映像与其他格式"), L("软件包（谨慎）"),
+    ]
+
+    /// 分组与后缀按原型 6-9 / 6-9-2 排。UTI 不写死，从后缀问系统，
+    /// 免得不同 macOS 版本对同一个后缀的登记不一样。
+    private static let declaredFormats: [(name: String, ext: String, extensions: String, group: Int, cautious: Bool)] = [
+        ("ZIP", "zip", ".zip .zipx .z01–.z99", 0, false),
+        ("7-Zip", "7z", ".7z", 0, false),
+        ("RAR", "rar", ".rar .r00–.r99", 0, false),
+        ("Comic RAR", "cbr", ".cbr", 0, false),
+        ("TAR", "tar", ".tar .tgz .tbz .tbz2 .txz", 0, false),
+
+        ("Gzip / TAR.GZ", "gz", ".gz .gzip", 1, false),
+        ("Bzip2 / TAR.BZ2", "bz2", ".bz2 .bzip2", 1, false),
+        ("XZ / TAR.XZ", "xz", ".xz", 1, false),
+        ("LZMA", "lzma", ".lzma", 1, false),
+        ("Lzip", "lz", ".lz", 1, false),
+
+        ("DMG", "dmg", ".dmg", 2, true),
+        ("ISO", "iso", ".iso", 2, true),
+        ("CAB", "cab", ".cab", 2, false),
+        ("CPIO", "cpio", ".cpio", 2, false),
+        ("LHA / LZH", "lzh", ".lha .lzh", 2, false),
+        ("ARJ", "arj", ".arj", 2, false),
+        ("XAR", "xar", ".xar", 2, false),
+        ("RPM", "rpm", ".rpm", 2, false),
+        ("MSI", "msi", ".msi", 2, true),
+        ("WIM", "wim", ".wim", 2, false),
+        ("Z", "z", ".z", 2, false),
+
+        ("JAR", "jar", ".jar", 3, true),
+        ("APK", "apk", ".apk", 3, true),
+        ("SPK", "spk", ".spk", 3, true),
+    ]
+
     func currentFormatBindings() -> [FormatBinding] {
         let bundleID = Bundle.main.bundleIdentifier ?? "com.qujunxian.Threxo"
         return Self.declaredFormats.map { item in
-            let handler = LSCopyDefaultRoleHandlerForContentType(
-                item.contentType as CFString,
-                LSRolesMask.all
-            )?.takeRetainedValue() as String?
+            // dyn.* 是系统按后缀临时生成的 UTI，LaunchServices 不给它登记 handler，
+            // 设了也不会生效。这类格式在界面上标成「系统未登记」并禁用开关。
+            let resolved = UTType(filenameExtension: item.ext)?.identifier
+            let uti = resolved?.hasPrefix("dyn.") == true ? nil : resolved
+            let handler = uti.flatMap {
+                LSCopyDefaultRoleHandlerForContentType($0 as CFString, LSRolesMask.all)?
+                    .takeRetainedValue() as String?
+            }
             return FormatBinding(
-                id: item.contentType,
+                id: item.ext,
                 name: item.name,
                 extensions: item.extensions,
-                contentType: item.contentType,
+                group: Self.formatGroups[item.group],
+                primaryExtension: item.ext,
+                cautious: item.cautious,
+                uti: uti,
                 isDefault: handler == bundleID
             )
         }
     }
 
-    private static let declaredFormats: [(name: String, extensions: String, contentType: String)] = [
-        ("ZIP", ".zip .zipx .z01–.z99", "public.zip-archive"),
-        ("7-Zip", ".7z", "org.7-zip.7-zip-archive"),
-        ("RAR", ".rar .r00–.r99", "com.rarlab.rar-archive"),
-        ("TAR", ".tar .tgz .tbz .tbz2 .txz", "public.tar-archive"),
-        ("Gzip / TAR.GZ", ".gz .gzip", "org.gnu.gnu-zip-archive"),
-        ("Bzip2 / TAR.BZ2", ".bz2 .bzip2", "public.bzip2-archive"),
-        ("XZ / TAR.XZ", ".xz", "org.tukaani.xz-archive"),
-        ("其他归档", "cab iso dmg wim jar", "public.archive")
-    ]
+    /// 切换某个格式的默认程序。
+    ///
+    /// `LSSetDefaultRoleHandlerForContentType` 在 macOS 26 上会返回成功但不生效，
+    /// 必须用 NSWorkspace 的 async 版本（系统可能对部分类型弹一次确认）。
+    /// - Returns: nil 表示成功，否则是一句可展示的错误。
+    func setFormatBinding(_ item: FormatBinding, enabled: Bool) async -> String? {
+        guard item.uti != nil,
+              let type = UTType(filenameExtension: item.primaryExtension) else {
+            return L("系统没登记这个后缀，改不了默认打开方式。")
+        }
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.qujunxian.Threxo"
+        let key = "threxo.format.previous." + type.identifier
+
+        let target: URL
+        if enabled {
+            // 先记下原来的默认程序，关掉开关时才能还原，而不是硬塞给归档实用工具。
+            let current = LSCopyDefaultRoleHandlerForContentType(
+                type.identifier as CFString, LSRolesMask.all
+            )?.takeRetainedValue() as String?
+            if let current, current != bundleID {
+                defaults.set(current, forKey: key)
+            }
+            target = Bundle.main.bundleURL
+        } else {
+            let previous = defaults.string(forKey: key) ?? "com.apple.archiveutility"
+            guard let url = NSWorkspace.shared.urlForApplication(
+                withBundleIdentifier: previous
+            ) else {
+                return String(format: L("找不到原来的默认程序（%@）"), previous)
+            }
+            target = url
+        }
+
+        do {
+            try await NSWorkspace.shared.setDefaultApplication(at: target, toOpen: type)
+        } catch {
+            return error.localizedDescription
+        }
+        if !enabled { defaults.removeObject(forKey: key) }
+        return nil
+    }
+
 }

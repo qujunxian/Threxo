@@ -41,10 +41,7 @@ extension Notification.Name {
     init() {
         // Finder 扩展必须由容器 App 设置监视目录，pkd 才会真正激活扩展。
         // 设在扩展的 init 里不保证持久化，这里做权威设置（整个磁盘 + 外接卷挂载点）。
-        FIFinderSyncController.default().directoryURLs = [
-            URL(fileURLWithPath: "/"),
-            URL(fileURLWithPath: "/Volumes"),
-        ]
+        SettingsStore.applyFinderDirectories(SettingsStore.shared.finderMenuOnExternalVolumes)
     }
 
     var body: some Scene {

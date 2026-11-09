@@ -325,10 +325,18 @@ final class AppModel: ObservableObject {
         statusText = L("正在读取归档…")
 
         Task { @MainActor in
-            var password: String?
+            // 开着「自动尝试」时先拿密码本里的密码列一次目录，能过就不打扰用户。
+            var password: String? = SettingsStore.shared.vaultAutoTry
+                ? PasswordVault.shared.password(for: url.lastPathComponent)
+                : nil
             var attempt = 0
             var cancelled = false
-            var result = await list(url, password: nil)
+            var result = await list(url, password: password)
+            if result.code != 0, password != nil {
+                // 自动试的密码不对，按无密码重列一次，别把错的当成有效密码带下去。
+                password = nil
+                result = await list(url, password: nil)
+            }
 
             // 头部加密的 7z、以及带密码的 zip，连列目录都会失败；
             // 这里先索要密码再重试，最多三轮，避免用户误输入后死循环。
@@ -369,6 +377,9 @@ final class AppModel: ObservableObject {
         }
         archivePassword = password
         archiveEncrypted = result.output.contains("Encrypted = +")
+        if let password, SettingsStore.shared.vaultAutoSave {
+            PasswordVault.shared.upsert(name: url.lastPathComponent, password: password, note: "")
+        }
         allEntries = ArchiveLister.parse(result.output)
         baseDirty = true
         rebuildVisible()
@@ -766,6 +777,15 @@ final class AppModel: ObservableObject {
                 self.statusText = archives.count > 1
                     ? String(format: L("已解压 %d 个归档到当前文件夹"), archives.count)
                     : L("解压完成，文件已放到当前文件夹")
+                if let used = self.archivePassword, SettingsStore.shared.vaultAutoSave {
+                    for archive in archives {
+                        PasswordVault.shared.upsert(
+                            name: archive.lastPathComponent,
+                            password: used,
+                            note: ""
+                        )
+                    }
+                }
                 if silent {
                     var body = String(format: L("已解压到「%@」"), folder.lastPathComponent)
                     if let note = self.pendingSafetyNote {
@@ -1400,6 +1420,13 @@ final class AppModel: ObservableObject {
                     }
                 }
                 self.statusText = message
+                if !self.options.password.isEmpty, SettingsStore.shared.vaultAutoSave {
+                    PasswordVault.shared.upsert(
+                        name: produced.lastPathComponent,
+                        password: self.options.password,
+                        note: ""
+                    )
+                }
                 self.options.resetPassword()
                 // 静默任务不给界面：不把新包读进窗口，产物就在用户右键的那个目录里，
                 // 结果通过通知中心交付（跟 Keka 一致）。
@@ -1528,6 +1555,11 @@ final class AppModel: ObservableObject {
         var dest = destination
         var renameExisting = renameExisting
         lastExtractDestination = destination
+
+        if archivePassword == nil, SettingsStore.shared.vaultAutoTry,
+           let saved = PasswordVault.shared.password(for: archive.lastPathComponent) {
+            archivePassword = saved
+        }
 
         // 已知有加密条目但还没拿到密码：先问，省掉一次必然失败的解压。
         if archiveEncrypted, archivePassword == nil {
@@ -2223,6 +2255,33 @@ final class AppModel: ObservableObject {
         case "debugEdit":
             // 仅调试：绕过确认弹窗，验证「备份 → 7zz d/rn → 回读」整条链路。
             debugEdit(url)
+        case "vaultTest":
+            // 仅调试：验证钥匙串写入 / 读回 / 删除。
+            let q = components?.queryItems ?? []
+            let name = q.first(where: { $0.name == "name" })?.value ?? "测试归档.zip"
+            let pwd = q.first(where: { $0.name == "pwd" })?.value ?? ""
+            if q.first(where: { $0.name == "op" })?.value == "clear" {
+                PasswordVault.shared.remove(name: name)
+            } else if !pwd.isEmpty {
+                PasswordVault.shared.upsert(name: name, password: pwd, note: "调试写入")
+            }
+            let vault = PasswordVault.shared
+            appDbg("vaultTest count=\(vault.entries.count) hit=\(vault.password(for: name) ?? "nil") err=\(vault.lastError ?? "none")")
+        case "formatTest":
+            // 仅调试：验证格式关联的接管与还原（只在冷门后缀上跑，跑完立刻还原）。
+            let q = components?.queryItems ?? []
+            let ext = q.first(where: { $0.name == "ext" })?.value ?? "lzma"
+            let on = q.first(where: { $0.name == "on" })?.value == "1"
+            let item = SettingsStore.shared.currentFormatBindings().first { $0.primaryExtension == ext }
+            if let item {
+                Task { @MainActor in
+                    let error = await SettingsStore.shared.setFormatBinding(item, enabled: on)
+                    let after = SettingsStore.shared.currentFormatBindings().first { $0.id == item.id }
+                    appDbg("formatTest ext=\(ext) on=\(on) err=\(error ?? "none") isDefault=\(after?.isDefault ?? false)")
+                }
+            } else {
+                appDbg("formatTest ext=\(ext) not found")
+            }
         case "settings":
             // 仅调试：`threxo://settings?page=extract` 直接落到某一页，方便逐页核对布局。
             let page = URLComponents(url: url, resolvingAgainstBaseURL: false)?
@@ -2341,7 +2400,9 @@ final class AppModel: ObservableObject {
         alert.addButton(withTitle: L("解压"))
         alert.addButton(withTitle: L("取消"))
 
-        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        let field: NSTextField = SettingsStore.shared.showPasswordByDefault
+            ? NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+            : NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         field.placeholderString = L("密码")
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
