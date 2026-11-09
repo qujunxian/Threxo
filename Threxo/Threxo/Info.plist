@@ -25,6 +25,10 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- 发行通道：正式版留空，预览版构建时用 THREXO_CHANNEL=preview 覆盖，
+	     关于页据此显示「预览版」字样，避免测试者把预览包当正式版。 -->
+	<key>ThrexoChannel</key>
+	<string>$(THREXO_CHANNEL)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>

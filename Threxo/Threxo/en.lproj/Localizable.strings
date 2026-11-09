@@ -241,7 +241,8 @@
 "内置 7-Zip 26.04，LGPL 许可要求随 App 可查阅" = "Bundled 7-Zip 26.04; its LGPL license requires the text to ship with the app";
 "查看…" = "View…";
 "版本 %@（%@）" = "Version %@ (%@)";
-"版本 %@（%@）· 7-Zip 26.04 引擎" = "Version %@ (%@) · 7-Zip 26.04 engine";
+"版本 %@（%@）%@ · 7-Zip 26.04 引擎" = "Version %@ (%@)%@ · 7-Zip 26.04 engine";
+"预览版" = "Preview";
 "检查更新" = "Check for Updates";
 "到发布页看看有没有新版本" = "Check the release page for a newer version";
 "打开下载页" = "Open download page";

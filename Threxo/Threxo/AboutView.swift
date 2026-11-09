@@ -38,6 +38,13 @@ struct AboutView: View {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
     }
 
+    /// 预览包在版本号后面加一句，免得测试者把它当成正式版。
+    /// 取值来自 Info.plist 的 ThrexoChannel，正式构建时为空。
+    private var channelSuffix: String {
+        let channel = Bundle.main.object(forInfoDictionaryKey: "ThrexoChannel") as? String ?? ""
+        return channel.lowercased() == "preview" ? " " + L("预览版") : ""
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -76,7 +83,7 @@ struct AboutView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(L("千梭"))
                     .font(.title2.bold())
-                Text(String(format: L("版本 %@（%@）· 7-Zip 26.04 引擎"), version, build))
+                Text(String(format: L("版本 %@（%@）%@ · 7-Zip 26.04 引擎"), version, build, channelSuffix))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
