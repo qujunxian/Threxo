@@ -12,20 +12,28 @@ struct ContentView: View {
     @ObservedObject private var options = CompressionOptions.shared
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            if !model.finderExtensionEnabled {
-                extensionBanner
-                Divider()
+        Group {
+            // 没打开归档时按原型 3 走独立的欢迎态：顶部品牌 + 设置入口，
+            // 中央大字与两个主按钮，不显示工具栏和状态栏。
+            if model.archiveURL == nil && !model.isBusy {
+                emptyWindow
+            } else {
+                VStack(spacing: 0) {
+                    header
+                    Divider()
+                    if !model.finderExtensionEnabled {
+                        extensionBanner
+                        Divider()
+                    }
+                    content
+                    if model.archiveURL != nil, !model.entries.isEmpty, !model.isBusy {
+                        Divider()
+                        hintBar
+                    }
+                    Divider()
+                    footer
+                }
             }
-            content
-            if model.archiveURL != nil, !model.entries.isEmpty, !model.isBusy {
-                Divider()
-                hintBar
-            }
-            Divider()
-            footer
         }
         .frame(minWidth: 760, minHeight: 480)
         .onAppear { model.refreshFinderExtensionState() }
@@ -156,6 +164,15 @@ struct ContentView: View {
 
             formatMenu
 
+            Button {
+                SettingsWindowController.shared.show()
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14))
+            }
+            .buttonStyle(.borderless)
+            .help(L("设置"))
+
             Button("压缩…") {
                 wizard.sources = nil
                 wizard.isPresented = true
@@ -221,7 +238,7 @@ struct ContentView: View {
     @ViewBuilder
     private var content: some View {
         if model.archiveURL == nil {
-            emptyState
+            emptyWindow
         } else {
             ArchiveBrowserView(model: model, browser: browser, drop: drop)
         }
@@ -255,29 +272,105 @@ struct ContentView: View {
         }
     }
 
-    private var emptyState: some View {
-        centered {
-            Image(systemName: "arrow.down.doc")
-                .font(.system(size: 40))
-                .foregroundStyle(.secondary)
-            Text("把压缩包拖到这里")
-                .font(.headline)
-            Text(String(format: L("也可以直接拖入文件或文件夹，立即打包成 %@"), options.format.displayName))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Button("打开归档…") { model.openArchive() }
-                .controlSize(.small)
-                .padding(.top, 4)
+    private var emptyWindow: some View {
+        ZStack(alignment: .top) {
+            LinearGradient(
+                colors: [
+                    Color(red: 1.0, green: 0.95, blue: 0.95).opacity(0.85),
+                    Color(red: 0.93, green: 0.94, blue: 1.0).opacity(0.85),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
+            VStack(spacing: 0) {
+                emptyTopBar
+                Spacer(minLength: 0)
+
+                VStack(spacing: 16) {
+                    Text(L("欢迎！拖入文件以开始"))
+                        .font(.system(size: 30, weight: .bold))
+                    Text(String(format: L("拖入压缩包查看内容，拖入文件或文件夹打包成 %@"),
+                                options.format.displayName))
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 12) {
+                        Button {
+                            model.openArchive()
+                        } label: {
+                            Label(L("打开压缩包"), systemImage: "folder")
+                                .frame(minWidth: 132)
+                        }
+                        .controlSize(.large)
+
+                        Button {
+                            wizard.sources = nil
+                            wizard.isPresented = true
+                        } label: {
+                            Label(L("创建压缩包"), systemImage: "plus")
+                                .frame(minWidth: 132)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                    }
+                    .padding(.top, 6)
+                }
+
+                Spacer(minLength: 0)
+                emptyFootnote
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 18)
+            .padding(.bottom, 14)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// 顶部居中放品牌，右侧留一个设置入口，跟原型 3 一致。
+    private var emptyTopBar: some View {
+        ZStack {
+            HStack(spacing: 8) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 24, height: 24)
+                Text(L("千梭"))
+                    .font(.system(size: 16, weight: .semibold))
+            }
+            HStack {
+                Spacer()
+                Button {
+                    SettingsWindowController.shared.show()
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 15))
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color(nsColor: .controlBackgroundColor)))
+                        .overlay(Circle().strokeBorder(Color.primary.opacity(0.10)))
+                }
+                .buttonStyle(.borderless)
+                .help(L("设置"))
+            }
         }
     }
 
-    private func centered<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(spacing: 10) {
-            Spacer()
-            content()
-            Spacer()
+    /// 扩展没启用时给一行小字，不占掉欢迎态的留白。
+    @ViewBuilder
+    private var emptyFootnote: some View {
+        if !model.finderExtensionEnabled {
+            HStack(spacing: 6) {
+                Image(systemName: "hand.point.up.left")
+                    .font(.system(size: 10))
+                Text(L("访达右键菜单还没启用"))
+                    .font(.system(size: 10.5))
+                Button(L("前往设置")) { model.openExtensionSettings() }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+            }
+            .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Footer

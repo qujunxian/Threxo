@@ -257,6 +257,15 @@ private struct GeneralSettingsPage: View {
                 }
             }
 
+            Card(L("欢迎页面")) {
+                Row(L("重新显示欢迎页面"), subtitle: L("重新走一遍首次设置向导，不会重置已有设置")) {
+                    Button(L("重新显示")) {
+                        OnboardingWindowController.shared.show(restart: true)
+                    }
+                    .controlSize(.small)
+                }
+            }
+
             Card(L("访达扩展")) {
                 Row(L("在移动存储中开启右键菜单"), subtitle: L("把外接硬盘、U 盘也纳入访达扩展的监视范围")) {
                     Toggle("", isOn: $store.finderMenuOnExternalVolumes)

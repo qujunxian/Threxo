@@ -2255,6 +2255,13 @@ final class AppModel: ObservableObject {
         case "debugEdit":
             // 仅调试：绕过确认弹窗，验证「备份 → 7zz d/rn → 回读」整条链路。
             debugEdit(url)
+        case "onboarding":
+            // 仅调试：`threxo://onboarding?step=3` 直接落到某一页，方便截图核对布局。
+            let raw = components?.queryItems?.first(where: { $0.name == "step" })?.value
+            OnboardingWindowController.shared.show(step: raw.flatMap { Int($0) })
+        case "mainwindow":
+            // 仅调试：不跑向导直接看主窗口空态。
+            MainWindowController.shared.show()
         case "vaultTest":
             // 仅调试：验证钥匙串写入 / 读回 / 删除。
             let q = components?.queryItems ?? []

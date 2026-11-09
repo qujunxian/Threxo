@@ -185,7 +185,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self else { return }
             guard !self.jobStarted, !Notifier.shared.launchedFromNotification else { return }
-            MainWindowController.shared.show(auto: true)
+            // 首次启动先走设置向导；静默任务（右键 / URL 事件）不受影响，
+            // 因为它们在上面已经被 jobStarted 挡掉了。
+            if !OnboardingWindowController.isCompleted {
+                OnboardingWindowController.shared.show()
+            } else {
+                MainWindowController.shared.show(auto: true)
+            }
         }
     }
 
@@ -345,6 +351,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard !MainWindowController.shared.isVisible else { return }
             guard !AboutWindowController.shared.isVisible else { return }
             guard !SettingsWindowController.shared.isVisible else { return }
+            // 向导窗口开着时不能退出，否则一次右键任务会把设置流程整个关掉。
+            guard !OnboardingWindowController.shared.isVisible else { return }
             guard !MainWindowController.shared.hasShown else { return }
             appDbg("terminate after headless job")
             NSApp.terminate(nil)
