@@ -470,9 +470,23 @@ final class AppModel: ObservableObject {
 
     /// 退回上一层，顺手删掉这一层的临时文件。
     func closeNestedArchive() {
-        guard let last = nestedChain.popLast() else { return }
-        try? FileManager.default.removeItem(at: last.tempDirectory)
-        loadArchive(last.parentURL, selecting: last.entryPath)
+        guard !nestedChain.isEmpty else { return }
+        popNestedArchives(keeping: nestedChain.count - 1)
+    }
+
+    /// 面包屑导航：保留 `keep` 层。
+    /// - keep = 0：回到磁盘上的原始包
+    /// - keep = n：回到第 n 层内嵌包（n 从 1 开始数）
+    func popNestedArchives(keeping keep: Int) {
+        guard keep >= 0, keep < nestedChain.count else { return }
+        let target = keep == 0 ? nestedChain[0].parentURL : nestedChain[keep - 1].url
+        // 回到目标层后，把当初从这里钻进去的那个条目重新选中。
+        let selecting = nestedChain[keep].entryPath
+        while nestedChain.count > keep {
+            let last = nestedChain.removeLast()
+            try? FileManager.default.removeItem(at: last.tempDirectory)
+        }
+        loadArchive(target, selecting: selecting)
     }
 
     /// 打开别的包、关闭窗口时，把整条链和临时文件清干净。
@@ -2530,8 +2544,13 @@ final class AppModel: ObservableObject {
             MainWindowController.shared.show()
             openNestedArchive(path: nestedPath)
         case "closeNested":
-            // 仅调试：退回外层。
-            closeNestedArchive()
+            // 仅调试：退回外层；带 `?to=0` 时按面包屑下标退到指定层。
+            if let raw = components?.queryItems?.first(where: { $0.name == "to" })?.value,
+               let keep = Int(raw) {
+                popNestedArchives(keeping: keep)
+            } else {
+                closeNestedArchive()
+            }
         case "preview":
             // 仅调试：`threxo://preview?path=<包内路径>` 选中该条目并走一次预览。
             guard let entryPath = components?.queryItems?.first(where: { $0.name == "path" })?.value else { break }

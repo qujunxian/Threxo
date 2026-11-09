@@ -683,3 +683,7 @@
 "这个内嵌压缩包打不开，可能加密了或者文件不完整" = "This nested archive can't be opened — it may be encrypted or incomplete";
 
 "内嵌于 %" = "Inside %";
+
+/* ===== 嵌套面包屑 / ⌘↑（2026-11-09）===== */
+"返回 %@" = "Back to %@";
+"内嵌包 · %d 个文件 · 解压后 %@" = "Nested · %d files · %@ uncompressed";

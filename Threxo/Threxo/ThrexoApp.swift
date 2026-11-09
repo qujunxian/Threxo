@@ -123,6 +123,16 @@ extension Notification.Name {
                     .keyboardShortcut("f")
                     .disabled(model.archiveURL == nil)
                 }
+
+                // 嵌套压缩包：⌘↑ 退回外层，和访达的「上层文件夹」一个语义。
+                CommandGroup(after: .newItem) {
+                    Divider()
+                    Button(L("返回外层压缩包")) {
+                        model.closeNestedArchive()
+                    }
+                    .keyboardShortcut(.upArrow, modifiers: .command)
+                    .disabled(!model.isNestedArchive)
+                }
             }
     }
 }

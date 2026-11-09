@@ -109,20 +109,34 @@ struct ContentView: View {
                 .font(.system(size: 19))
                 .foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
+                    if model.isNestedArchive {
+                        // 祖先层做成熟链接：点哪一层就退到哪一层。
+                        let ancestors = Array(model.archiveBreadcrumb.dropLast().enumerated())
+                        ForEach(ancestors, id: \.offset) { index, name in
+                            Button {
+                                model.popNestedArchives(keeping: index)
+                            } label: {
+                                Text(name)
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            .buttonStyle(.plain)
+                            .help(String(format: L("返回 %@"), name))
+
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
                     Text(model.archiveURL?.lastPathComponent ?? L("千梭"))
                         .font(.system(size: 14, weight: .semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    if model.isNestedArchive {
-                        Text(L("内嵌"))
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Color.accentColor)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 1.5)
-                            .background(Capsule().fill(Color.accentColor.opacity(0.16)))
-                    }
                 }
+                .lineLimit(1)
                 Text(subtitle)
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
@@ -149,9 +163,9 @@ struct ContentView: View {
             return L("拖入压缩包即可查看内容 · 拖入文件或文件夹即可压缩")
         }
         if model.isNestedArchive {
+            // 层级已经由标题上的面包屑说明，这里只报数量。
             return String(
-                format: L("内嵌于 %@ · %d 个文件 · 解压后 %@"),
-                model.nestedTrail,
+                format: L("内嵌包 · %d 个文件 · 解压后 %@"),
                 model.fileCount,
                 ByteFormatter.string(model.totalUncompressedSize)
             )
