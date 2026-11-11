@@ -692,3 +692,13 @@
 "自己挑选解压位置（⇧⌘E）" = "Choose where to extract (⇧⌘E)";
 "还有 %d 种常用格式没交给千梭，双击可能没反应" = "%d common formats aren't assigned to Threxo yet — double-clicking them may do nothing";
 "去关联" = "Assign";
+
+/* ===== 统一进度弹窗 / 动态处理器核心数（2026-11-11）===== */
+"正在压缩" = "Compressing";
+"正在解压" = "Extracting";
+"%d 核" = "%d cores";
+"本机 %d 核，默认用满；调低可给别的程序留点余力" = "This Mac has %d cores, all used by default. Lower it to leave headroom for other apps";
+
+/* ===== 解压页返回首页（2026-11-11）===== */
+"返回首页" = "Back to Home";
+"任务进行中，完成后才能返回" = "A task is running — you can go back when it finishes";

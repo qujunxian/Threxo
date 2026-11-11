@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import Combine
 import CoreServices
+import Darwin
 import ServiceManagement
 import FinderSync
 import UniformTypeIdentifiers
@@ -13,6 +14,21 @@ import UniformTypeIdentifiers
 /// 解压策略、列表呈现）。压缩页只是把 `CompressionOptions` 的控件搬过来。
 final class SettingsStore: ObservableObject {
     static let shared = SettingsStore()
+
+    /// 本机实际物理核心数：Apple Silicon 会把性能核 + 能效核一起算进来，
+    /// Intel 上则是物理核（不含超线程）。读不到 sysctl 时回落到逻辑处理器数。
+    /// 设置页「处理器使用」的 1…n 与默认值都以此为准，不再写死 2/4/8。
+    static let coreCount: Int = {
+        var value: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        if sysctlbyname("hw.physicalcpu", &value, &size, nil, 0) == 0, value > 0 {
+            return Int(value)
+        }
+        return max(1, ProcessInfo.processInfo.processorCount)
+    }()
+
+    /// Picker 的全部可选项：1 … n。
+    static var coreOptions: [Int] { Array(1...coreCount) }
 
     // MARK: - 枚举
 
@@ -247,7 +263,8 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(showPasswordByDefault, forKey: Key.showPasswordByDefault) }
     }
 
-    /// 7zz 的 `-mmt` 上限。0 表示不限制，交给 7-Zip 自己用满所有核心。
+    /// 7zz 的 `-mmt` 上限，范围 1…`coreCount`，默认就是最大的那一档（用满本机核心）。
+    /// 旧版本用 0 表示「不限制」，读取时统一迁移到 `coreCount`。
     @Published var maxThreads: Int {
         didSet { defaults.set(maxThreads, forKey: Key.maxThreads) }
     }
@@ -327,7 +344,14 @@ final class SettingsStore: ObservableObject {
 
         language = Self.read(defaults, Key.language, .system)
         showPasswordByDefault = defaults.object(forKey: Key.showPasswordByDefault) as? Bool ?? false
-        maxThreads = defaults.object(forKey: Key.maxThreads) as? Int ?? 0
+        // 迁移旧值：没设过 / 旧版「全部可用」(0) → 本机最大核心数；
+        // 手动选过但超过本机核心数（换机、虚拟机改配置）→ 收敛到最大档；
+        // 仍落在 1…n 内的显式选择保留，不覆盖用户偏好。
+        let savedThreads = defaults.object(forKey: Key.maxThreads) as? Int
+        maxThreads = {
+            guard let saved = savedThreads, saved > 0 else { return Self.coreCount }
+            return min(saved, Self.coreCount)
+        }()
         finderMenuOnExternalVolumes = defaults.object(forKey: Key.finderExternalVolumes) as? Bool ?? true
         miniDefaultOpen = defaults.object(forKey: Key.miniDefaultOpen) as? Bool ?? false
         miniGlassMaterial = defaults.object(forKey: Key.miniGlass) as? Bool ?? true
@@ -465,7 +489,7 @@ final class SettingsStore: ObservableObject {
         quickExtractOnDoubleClick = false
         language = .system
         showPasswordByDefault = false
-        maxThreads = 0
+        maxThreads = Self.coreCount
         finderMenuOnExternalVolumes = true
         miniDefaultOpen = false
         miniGlassMaterial = true

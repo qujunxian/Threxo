@@ -1,5 +1,24 @@
 import AppKit
 
+/// 在访达里定位任务产物的统一入口。
+///
+/// `NSWorkspace.activateFileViewerSelecting` 传「目录」时，系统打开的是该目录的
+/// **父目录**并把该目录选中。解压平铺到当前目录时若直接把目标目录传进去，
+/// 窗口就会停在上一层（在 Downloads 里解压，却打开 qujunxian 家目录并高亮「下载」）。
+/// 因此只把「具体产物」交给它；一件产物都没有时改用 `open` 直接打开目标目录内容。
+enum FinderReveal {
+    static func show(items: [URL], in folder: URL) {
+        let existing = items.filter { FileManager.default.fileExists(atPath: $0.path) }
+        appDbg("FinderReveal folder=\(folder.path) items=\(existing.map(\.lastPathComponent))")
+        if existing.isEmpty {
+            // 拿不到产物时才退回「打开目录内容」，绝不 select 目录（会跳到父目录）。
+            NSWorkspace.shared.open(folder)
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting(existing)
+        }
+    }
+}
+
 /// 任务完成后的系统通知。
 ///
 /// 访达右键是「没有窗口」的链路：任务跑完、进程随即退出，用户看不到任何结果，
@@ -31,19 +50,37 @@ final class Notifier: NSObject, NSUserNotificationCenterDelegate {
         deliver(title: title, body: body, reveal: reveal?.path)
     }
 
-    func failure(title: String, body: String) {
-        deliver(title: title, body: body, reveal: nil)
+    /// 解压完成：带上本次新增的全部顶层产物，点击通知时选中它们而不是「目标目录」。
+    func success(title: String, body: String, revealItems: [URL], in folder: URL) {
+        deliver(
+            title: title,
+            body: body,
+            revealItems: revealItems.map(\.path),
+            revealFolder: folder.path
+        )
     }
 
-    private func deliver(title: String, body: String, reveal: String?) {
+    func failure(title: String, body: String) {
+        deliver(title: title, body: body)
+    }
+
+    private func deliver(
+        title: String,
+        body: String,
+        reveal: String? = nil,
+        revealItems: [String]? = nil,
+        revealFolder: String? = nil
+    ) {
         prepare()
         let notification = NSUserNotification()
         notification.title = title
         notification.informativeText = body
         notification.soundName = NSUserNotificationDefaultSoundName
-        if let reveal {
-            notification.userInfo = ["reveal": reveal]
-        }
+        var info: [String: Any] = [:]
+        if let reveal { info["reveal"] = reveal }
+        if let revealItems, !revealItems.isEmpty { info["revealItems"] = revealItems }
+        if let revealFolder { info["revealFolder"] = revealFolder }
+        if !info.isEmpty { notification.userInfo = info }
         NSUserNotificationCenter.default.deliver(notification)
         appDbg("notifier delivered \(title) | \(body)")
     }
@@ -65,11 +102,24 @@ final class Notifier: NSObject, NSUserNotificationCenterDelegate {
         launchedFromNotification = true
         AppDelegate.shared?.suppressAutoWindow()
 
-        if let path = notification.userInfo?["reveal"] as? String {
+        if let paths = notification.userInfo?["revealItems"] as? [String], !paths.isEmpty {
+            let items = paths.map { URL(fileURLWithPath: $0) }
+            let folder = (notification.userInfo?["revealFolder"] as? String)
+                .map { URL(fileURLWithPath: $0) }
+                ?? items[0].deletingLastPathComponent()
+            // 产物可能已被用户移走，FinderReveal 会过滤不存在的，空了就直接打开目标目录。
+            FinderReveal.show(items: items, in: folder)
+        } else if let path = notification.userInfo?["reveal"] as? String {
             let url = URL(fileURLWithPath: path)
-            // 产物可能已被用户移走，只在还存在时定位，避免弹一个空窗口。
-            if FileManager.default.fileExists(atPath: url.path) {
-                NSWorkspace.shared.activateFileViewerSelecting([url])
+            // 单个目标可能是目录（压缩完成指向新建文件夹）：目录用 open 打开内容，
+            // 文件用 select 选中，两者都不会再跳到上一层。
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) {
+                if isDirectory.boolValue {
+                    NSWorkspace.shared.open(url)
+                } else {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
             }
         }
 

@@ -35,6 +35,7 @@
 		AA00000000000000000000A0 /* ComposeArchiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A1 /* ComposeArchiveView.swift */; };
 		AA00000000000000000000A2 /* ActionBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A3 /* ActionBar.swift */; };
 		AA00000000000000000000A4 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A5 /* Theme.swift */; };
+		AA00000000000000000000A6 /* ProgressPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A7 /* ProgressPanel.swift */; };
 		AA0000000000000000000088 /* CompressWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000087 /* CompressWizardView.swift */; };
 		AA0000000000000000000090 /* BrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000091 /* BrowserView.swift */; };
 		AA0000000000000000000092 /* MultiDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000093 /* MultiDrag.swift */; };
@@ -104,6 +105,7 @@
 		AA00000000000000000000A1 /* ComposeArchiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeArchiveView.swift; sourceTree = "<group>"; };
 		AA00000000000000000000A3 /* ActionBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionBar.swift; sourceTree = "<group>"; };
 		AA00000000000000000000A5 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		AA00000000000000000000A7 /* ProgressPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressPanel.swift; sourceTree = "<group>"; };
 		AA0000000000000000000087 /* CompressWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompressWizardView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000091 /* BrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000093 /* MultiDrag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/MultiDrag.swift"; sourceTree = "<group>"; };
@@ -161,6 +163,7 @@
 				AA00000000000000000000A1 /* ComposeArchiveView.swift */,
 				AA00000000000000000000A3 /* ActionBar.swift */,
 				AA00000000000000000000A5 /* Theme.swift */,
+				AA00000000000000000000A7 /* ProgressPanel.swift */,
 			);
 			path = Threxo;
 			sourceTree = "<group>";
@@ -367,6 +370,7 @@
 				AA00000000000000000000A0 /* ComposeArchiveView.swift in Sources */,
 				AA00000000000000000000A2 /* ActionBar.swift in Sources */,
 				AA00000000000000000000A4 /* Theme.swift in Sources */,
+				AA00000000000000000000A6 /* ProgressPanel.swift in Sources */,
 				AA0000000000000000000054 /* CompressionOptions.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -493,7 +497,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 12;
 				DEVELOPMENT_TEAM = T9DDF2YTVH;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -501,7 +505,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Threxo/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 1.1.0;
+				MARKETING_VERSION = 1.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.qujunxian.Threxo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -517,7 +521,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 12;
 				DEVELOPMENT_TEAM = T9DDF2YTVH;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -525,7 +529,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Threxo/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 1.1.0;
+				MARKETING_VERSION = 1.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.qujunxian.Threxo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -541,7 +545,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 12;
 				DEVELOPMENT_TEAM = T9DDF2YTVH;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -549,7 +553,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ThrexoFinder/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks @executable_path/../../../../Frameworks";
-				MARKETING_VERSION = 1.1.0;
+				MARKETING_VERSION = 1.1.1;
 				OTHER_LDFLAGS = "-framework FinderSync";
 				PRODUCT_BUNDLE_IDENTIFIER = com.qujunxian.Threxo.Finder;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -566,7 +570,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 12;
 				DEVELOPMENT_TEAM = T9DDF2YTVH;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -574,7 +578,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ThrexoFinder/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks @executable_path/../../../../Frameworks";
-				MARKETING_VERSION = 1.1.0;
+				MARKETING_VERSION = 1.1.1;
 				OTHER_LDFLAGS = "-framework FinderSync";
 				PRODUCT_BUNDLE_IDENTIFIER = com.qujunxian.Threxo.Finder;
 				PRODUCT_NAME = "$(TARGET_NAME)";

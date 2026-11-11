@@ -32,7 +32,7 @@ extension Notification.Name {
 /// 主窗口刻意不写成 SwiftUI 的 `WindowGroup`：`WindowGroup` 在 App 启动时
 /// 必然建窗，而访达右键走的是**静默任务**——不该为了解一个压缩包把主界面弹出来。
 /// 改成「零窗口启动 + 按需创建 NSWindow」之后：
-///   · 右键解压/压缩全程不建窗、不抢焦点、不在 Dock 里留图标；
+///   · 右键解压/压缩不建主窗口，只弹一枚进度浮层，任务结束自动收起；
 ///   · 双击归档、点 Dock 图标、菜单命令需要界面时才建窗。
 @main struct ThrexoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -176,6 +176,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 仅调试：把压缩向导离屏渲染成 PNG 后退出，便于无界面环境下核对布局。
         if let path = ProcessInfo.processInfo.environment["THREXO_RENDER_WIZARD"] {
             renderWizardPreview(to: path)
+            NSApp.terminate(nil)
+            return
+        }
+
+        // 仅调试：把统一进度弹窗离屏渲染成 PNG，核对压缩 / 解压两种文案与深浅色。
+        if let out = ProcessInfo.processInfo.environment["THREXO_RENDER_PROGRESS"] {
+            renderProgressPreview(to: out)
+            NSApp.terminate(nil)
+            return
+        }
+
+        // 仅调试：核对「处理器使用」卡片的本机核心数文案与默认档。
+        if let out = ProcessInfo.processInfo.environment["THREXO_RENDER_CORES"] {
+            renderCoresPreview(to: out)
             NSApp.terminate(nil)
             return
         }
@@ -371,7 +385,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: 静默任务生命周期
 
-    /// 进入静默模式：不建窗、不抢焦点；进度只在菜单栏显示。
+    /// 进入静默模式：不建主窗口、不抢焦点；进度走统一浮层，菜单栏保留兜底入口。
     /// - Returns: 是否真的按静默方式跑（主窗口已可见时返回 false，任务进度就显示在窗口里）。
     ///
     /// 刻意**不**切 `activationPolicy(.accessory)`：切成后台程序之后系统既不会弹
@@ -445,6 +459,23 @@ func snapshotView<V: View>(_ view: V, size: CGSize, to path: String) {
         }
     }
     window.orderOut(nil)
+}
+
+@MainActor
+func renderProgressPreview(to path: String) {
+    let env = ProcessInfo.processInfo.environment
+    let kind: TaskProgressKind = env["THREXO_PROGRESS_KIND"] == "extract" ? .extract : .compress
+    let percent = Int(env["THREXO_PROGRESS_PERCENT"] ?? "") ?? 58
+    let total = Int64(env["THREXO_PROGRESS_TOTAL"] ?? "") ?? 568_720_000
+    let name = env["THREXO_PROGRESS_NAME"] ?? "SP-AMR-CUSTOM_V08-beta1.zip"
+    let state = TaskProgressState(kind: kind, fileName: name,
+                                  totalBytes: total, percent: percent,
+                                  phase: kind.title)
+    let view = TaskProgressView(state: state, onCancel: {})
+        .background(Color(nsColor: .windowBackgroundColor))
+    let size = CGSize(width: TaskProgressView.cardWidth + 56,
+                      height: TaskProgressView.cardHeight + 56)
+    snapshotView(view, size: size, to: path)
 }
 
 @MainActor

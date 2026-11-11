@@ -245,12 +245,15 @@ private struct GeneralSettingsPage: View {
             }
 
             Card(L("处理器使用")) {
-                Row(L("最大可用核心数"), subtitle: L("限制 7-Zip 的线程数，压大包时给别的程序留点余力")) {
+                Row(
+                    L("最大可用核心数"),
+                    subtitle: String(format: L("本机 %d 核，默认用满；调低可给别的程序留点余力"),
+                                     SettingsStore.coreCount)
+                ) {
                     Picker("", selection: $store.maxThreads) {
-                        Text(L("全部可用")).tag(0)
-                        Text("2").tag(2)
-                        Text("4").tag(4)
-                        Text("8").tag(8)
+                        ForEach(SettingsStore.coreOptions, id: \.self) { count in
+                            Text(String(format: L("%d 核"), count)).tag(count)
+                        }
                     }
                     .labelsHidden()
                     .frame(width: 130)
@@ -1126,3 +1129,36 @@ private struct Row<Trailing: View>: View {
         .padding(.vertical, 10)
     }
 }
+
+#if DEBUG
+/// 仅调试：把「处理器使用」卡片离屏渲染成 PNG，核对本机核心数文案与默认档。
+/// 设置窗口很长、Aqua 的窗口位置又容易被系统挪到屏幕边缘，直接拍整窗不稳定。
+@MainActor
+func renderCoresPreview(to path: String) {
+    struct CorePreview: View {
+        @ObservedObject var store = SettingsStore.shared
+
+        var body: some View {
+            Card(L("处理器使用")) {
+                Row(
+                    L("最大可用核心数"),
+                    subtitle: String(format: L("本机 %d 核，默认用满；调低可给别的程序留点余力"),
+                                     SettingsStore.coreCount)
+                ) {
+                    Picker("", selection: $store.maxThreads) {
+                        ForEach(SettingsStore.coreOptions, id: \.self) { count in
+                            Text(String(format: L("%d 核"), count)).tag(count)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 130)
+                }
+            }
+            .padding(24)
+            .frame(width: 720, height: 160, alignment: .top)
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
+    }
+    snapshotView(CorePreview(), size: CGSize(width: 720, height: 160), to: path)
+}
+#endif

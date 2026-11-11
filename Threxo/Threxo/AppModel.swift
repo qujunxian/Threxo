@@ -20,7 +20,8 @@ func L(_ text: String) -> String {
 /// 两条链路刻意分开：
 ///   · **界面链路**（双击归档、菜单、拖进窗口）：解到同级同名文件夹，可选位置，全部在窗口里反馈；
 ///   · **静默链路**（访达右键 `threxo://extract|compress`）：解压到压缩包所在文件夹、
-///     压缩产物落在当前目录，不建主窗口、不弹位置选择，进度只在菜单栏显示。
+///     压缩产物落在当前目录，不建主窗口、不弹位置选择，进度由统一浮层显示
+///     （菜单栏另有一份兜底进度与取消入口）。
 /// 解压完成后问一次「原包要不要移入废纸篓」。
 /// 只有窗口链路会用到；访达右键的静默解压不弹任何东西。
 struct ExtractCompletionPrompt: Identifiable {
@@ -100,11 +101,41 @@ final class AppModel: ObservableObject {
             }
         }
     }
-    @Published var progress: Int = 0
-    @Published var statusText = L("就绪")
+    /// 当前压缩 / 解压任务的进度弹窗状态。非 nil 时由 `TaskProgressPanel` 显示浮层，
+    /// 主窗口底栏的旧进度条让位（见 ContentView.footer）。
+    /// 页面链路与访达右键 / 双击静默链路共用这一份状态，进度展示只有一套。
+    @Published var taskProgress: TaskProgressState? {
+        didSet {
+            if let state = taskProgress {
+                TaskProgressPanel.shared.show(state)
+            } else {
+                TaskProgressPanel.shared.hide()
+            }
+        }
+    }
+
+    // 任务已收尾（finished）后不再同步：压缩成功会顺手 load 新归档，
+    // 那个流程又会 isBusy=true / progress=0，别把已经补满的 100% 打回去。
+    @Published var progress: Int = 0 {
+        didSet {
+            guard taskProgress?.finished == false else { return }
+            taskProgress?.percent = progress
+            #if DEBUG
+            // 每跨过一个十位数记一笔，用来核对浮层确实跟着 7zz 的进度在走。
+            if progress / 10 != oldValue / 10 {
+                appDbg("taskProgress \(progress)% item=\(currentItem ?? "-")")
+            }
+            #endif
+        }
+    }
+    @Published var statusText = L("就绪") {
+        didSet { if taskProgress?.finished == false { taskProgress?.phase = statusText } }
+    }
     @Published var errorMessage: String?
     /// 当前正在处理的文件（来自 7zz -bb1 的进度行）。
-    @Published var currentItem: String?
+    @Published var currentItem: String? {
+        didSet { if taskProgress?.finished == false { taskProgress?.currentItem = currentItem } }
+    }
 
     /// 访达右键扩展是否已在「系统设置 → 登录项与扩展」里启用。
     /// 由 pkd 提供，状态可能滞后数秒，界面上提供手动刷新。
@@ -196,6 +227,11 @@ final class AppModel: ObservableObject {
     /// 本次解压实际落到的目录。用户在空间预检里点了「换位置」之后，
     /// 目标就不再是调用方传进来的那个，收尾提示与「在访达中显示」都得跟着改。
     private var lastExtractDestination: URL?
+
+    /// 本次解压新增的顶层条目。完成后在访达里选中「产物」而不是「目标目录」：
+    /// `activateFileViewerSelecting` 传目录时打开的是它的父目录并选中该目录，
+    /// 双击静默解压平铺到当前目录时会因此弹到上一层。
+    private var lastExtractedItems: [URL] = []
 
     struct PasswordPrompt: Identifiable {
         let id = UUID()
@@ -610,15 +646,18 @@ final class AppModel: ObservableObject {
             || raw.contains(".Trashes") || raw.contains(".background")
     }
 
-    /// 双击归档 / 拖到 Dock 图标 / 「打开方式」都会走到这里。
+    /// 双击归档 / 拖到窗口 / 拖到 Dock 图标 / 「打开方式」都会走到这里。
     func receiveOpenFiles(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
         let archives = urls.filter { Self.isArchiveURL($0) }
         if let first = archives.first {
             load(archive: first)
         } else {
-            // 非归档（文件夹、普通文件）→ 按右键菜单同样的语义：压缩。
-            compressAutomatically(urls)
+            // 非归档（文件夹、普通文件）：不再直接开压，先进创建页把源填进清单，
+            // 用户可以继续追加、删减、改格式，确认后才保存——和「创建压缩包」一个流程。
+            // 访达右键的「用千梭压缩」仍走 compressAutomatically，保留一步到位的快速链路。
+            MainWindowController.shared.show()
+            ComposeArchiveState.shared.activate(sources: urls)
         }
     }
 
@@ -780,8 +819,16 @@ final class AppModel: ObservableObject {
         }
 
         try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+        lastExtractedItems = []
 
-        runTask(status: status) { [self] in
+        runTask(
+            status: status,
+            progress: TaskProgressDescriptor(
+                kind: .extract,
+                fileName: archive.lastPathComponent,
+                totalBytes: Self.byteSize(of: archive)
+            )
+        ) { [self] in
             await extractBlocking(archive: archive, to: dest, items: items, renameExisting: rename)
         } completion: { code in
             // 空间预检里可能点了「换位置」，实际落点以链路里记下的为准。
@@ -796,7 +843,9 @@ final class AppModel: ObservableObject {
                 }
                 self.statusText = text
                 if reveal, SettingsStore.shared.revealAfterExtract {
-                    NSWorkspace.shared.activateFileViewerSelecting([landed])
+                    // 目标是新建的解包文件夹：选中里面的产物，或至少打开文件夹内容，
+                    // 不再把目录本身交给 select（那会打开它的父目录）。
+                    FinderReveal.show(items: self.lastExtractedItems, in: landed)
                 }
                 self.applyArchiveHandling(archive: archive)
                 // 「每次询问」时由弹窗决定关不关窗口，这里先不抢着关。
@@ -1019,6 +1068,8 @@ final class AppModel: ObservableObject {
         guard !urls.isEmpty else { return }
         guard canStartTask() else { NSSound.beep(); return }
 
+        // 每次任务重来，避免上一次的产物串到这次的「在访达中显示」。
+        lastExtractedItems = []
         let archives = urls
         if let destination {
             try? FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
@@ -1030,13 +1081,21 @@ final class AppModel: ObservableObject {
         archiveEncrypted = false
         let silent = beginSilentRun()
 
-        runTask(status: L("正在解压…")) { [self] in
+        runTask(
+            status: L("正在解压…"),
+            progress: TaskProgressDescriptor(
+                kind: .extract,
+                fileName: archives[0].lastPathComponent,
+                totalBytes: Self.byteSize(of: archives)
+            )
+        ) { [self] in
             var lastCode: Int32 = 0
             for (index, archive) in archives.enumerated() {
                 await MainActor.run {
                     self.statusText = archives.count > 1
                         ? String(format: L("正在解压 (%d/%d)…"), index + 1, archives.count)
                         : L("正在解压…")
+                    self.taskProgress?.fileName = archive.lastPathComponent
                 }
                 // 当前目录 = 压缩包所在目录：内容直接铺在这里，不再多套一层同名文件夹。
                 let dest = destination ?? archive.deletingLastPathComponent()
@@ -1061,7 +1120,11 @@ final class AppModel: ObservableObject {
                     ? String(format: L("已解压 %d 个归档到当前文件夹"), archives.count)
                     : L("解压完成，文件已放到当前文件夹")
                 if revealResult {
-                    NSWorkspace.shared.activateFileViewerSelecting([folder])
+                    // 先收起进度浮层，再让访达结果露出来，别让浮层压在新窗口上。
+                    self.taskProgress = nil
+                    // 传「产物」而不是「目标目录」：否则 activateFileViewerSelecting
+                    // 会打开目标目录的父目录并选中它，窗口停在上一层。
+                    FinderReveal.show(items: self.lastExtractedItems, in: folder)
                 }
                 if let used = self.archivePassword, SettingsStore.shared.vaultAutoSave {
                     for archive in archives {
@@ -1083,7 +1146,8 @@ final class AppModel: ObservableObject {
                             ? String(format: L("已解压 %d 个归档"), archives.count)
                             : L("解压完成"),
                         body: body,
-                        reveal: folder
+                        revealItems: self.lastExtractedItems,
+                        in: folder
                     )
                 }
             } else {
@@ -1655,7 +1719,16 @@ final class AppModel: ObservableObject {
         // 否则进度条已经冲到 100 还在跑，看起来像卡住了。
         let compressCap = verify ? 90 : 100
 
-        runTask(status: L("正在压缩…")) { [self] in
+        runTask(
+            status: L("正在压缩…"),
+            progress: TaskProgressDescriptor(
+                kind: .compress,
+                fileName: dest.lastPathComponent,
+                totalBytes: 0,
+                // 源可能是几十万个小文件的文件夹，递归统计放到后台算。
+                sizeProvider: { Self.byteSize(of: sources) }
+            )
+        ) { [self] in
             let code = await compressBlocking(
                 sources: sources,
                 to: dest,
@@ -1919,6 +1992,13 @@ final class AppModel: ObservableObject {
         if !escaped.isEmpty {
             reportEscape(escaped, in: dest, silent: silent)
             return Self.exitUnsafePath
+        }
+
+        if result.code == 0 {
+            // 记下真正落地的顶层产物（用目录差异，-aou 自动改名后也能拿到真实名字）。
+            // 完成后在访达里选中「产物」，而不是把目标目录交给 activateFileViewerSelecting：
+            // 后者传目录会打开它的父目录并选中该目录，窗口就会停在上一层。
+            lastExtractedItems.append(contentsOf: added.map { dest.appendingPathComponent($0) })
         }
 
         return result.code
@@ -2471,8 +2551,11 @@ final class AppModel: ObservableObject {
     }
 
     /// Runs `work` off-main with the busy spinner, then calls `completion` on main.
+    /// - Parameter progress: 非 nil 表示这是压缩 / 解压任务，展示统一进度弹窗；
+    ///   不传的任务（列目录、加文件、改包）沿用底栏的小进度条，不弹浮层。
     private func runTask(
         status: String,
+        progress descriptor: TaskProgressDescriptor? = nil,
         work: @escaping @MainActor () async -> Int32,
         completion: @escaping @MainActor (Int32) -> Void
     ) {
@@ -2482,19 +2565,118 @@ final class AppModel: ObservableObject {
         currentItem = nil
         statusText = status
         noteActivity()
+        if let descriptor { beginTaskProgress(descriptor, phase: status) }
         Task.detached(priority: .userInitiated) {
             let code = await work()
             await MainActor.run {
                 self.activeProcess = nil
                 self.noteActivity()
                 self.isBusy = false
+                // completion 里会改 status/progress（压缩成功后还会 load 新归档），
+                // 先把这份浮层标记结束，别让那些状态把补满的 100% 打回 0%。
+                let finishing = self.taskProgress
+                finishing?.finished = true
                 completion(code)
+                self.endTaskProgress(finishing)
             }
         }
     }
 
     func cancel() {
         activeProcess?.terminate()
+    }
+
+    // MARK: - 统一进度弹窗
+
+    /// 任务开始：建一份可观察状态，驱动浮层。总量若在后台才算得出来，
+    /// 先只显示百分比，算完回填，绝不让「统计文件夹大小」拖慢弹窗出现。
+    private func beginTaskProgress(_ descriptor: TaskProgressDescriptor, phase: String) {
+        let state = TaskProgressState(
+            kind: descriptor.kind,
+            fileName: descriptor.fileName,
+            totalBytes: descriptor.totalBytes,
+            percent: 0,
+            phase: phase
+        )
+        taskProgress = state
+        appDbg("taskProgress show kind=\(descriptor.kind) file=\(descriptor.fileName) "
+               + "total=\(descriptor.totalBytes) sizeProvider=\(descriptor.sizeProvider != nil)")
+        guard let provider = descriptor.sizeProvider else { return }
+        DispatchQueue.global(qos: .utility).async {
+            let total = provider()
+            DispatchQueue.main.async { [weak self, weak state] in
+                guard let self, let state, self.taskProgress === state else { return }
+                state.totalBytes = total
+            }
+        }
+    }
+
+    /// 任务结束：补满进度，留 0.55 秒让人看清 100% 再淡出。
+    /// 已经弹出「原包要不要移入废纸篓」或密码框时立刻收起，免得浮层挡住对话框。
+    private func endTaskProgress(_ state: TaskProgressState?) {
+        guard let state else { return }
+        appDbg("taskProgress hide kind=\(state.kind) file=\(state.fileName) percent=100")
+        state.percent = 100
+        state.currentItem = nil
+        state.finished = true
+        if extractCompletionPrompt != nil || passwordPrompt != nil {
+            // 弹了询问卡片 / 密码框就立刻收，别让浮层压在对话框上。
+            if taskProgress === state { taskProgress = nil }
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { [weak self] in
+            // 期间若已有新任务接管浮层，这个延时不能把人家的弹窗关掉。
+            guard let self, self.taskProgress === state else { return }
+            self.taskProgress = nil
+        }
+    }
+
+    /// 弹窗「取消」：真实任务终止 7zz；调试态没有进程时直接收起浮层。
+    func cancelProgressTask() {
+        if isBusy {
+            cancel()
+        } else {
+            taskProgress = nil
+        }
+    }
+
+    /// 仅调试：`threxo://progressDemo?kind=compress&percent=58&total=…&name=…&hold=6`
+    /// 静态展示浮层，便于截图核对布局与深色模式。不启动任何进程。
+    func debugProgressDemo(kind: TaskProgressKind, percent: Int, totalBytes: Int64,
+                           fileName: String, hold: TimeInterval) {
+        let state = TaskProgressState(kind: kind, fileName: fileName,
+                                      totalBytes: totalBytes, percent: percent,
+                                      phase: kind.title)
+        taskProgress = state
+        DispatchQueue.main.asyncAfter(deadline: .now() + hold) { [weak self] in
+            guard self?.taskProgress === state else { return }
+            self?.taskProgress = nil
+        }
+    }
+
+    /// 磁盘上的实际大小。目录递归统计，只在后台线程调用。
+    static func byteSize(of url: URL) -> Int64 {
+        let fm = FileManager.default
+        let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey])
+        if values?.isDirectory == true {
+            guard let enumerator = fm.enumerator(
+                at: url,
+                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+                options: [.skipsHiddenFiles]
+            ) else { return 0 }
+            var total: Int64 = 0
+            for case let file as URL in enumerator {
+                let v = try? file.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+                guard v?.isRegularFile == true else { continue }
+                total += Int64(v?.fileSize ?? 0)
+            }
+            return total
+        }
+        return Int64(values?.fileSize ?? 0)
+    }
+
+    static func byteSize(of urls: [URL]) -> Int64 {
+        urls.reduce(Int64(0)) { $0 + Self.byteSize(of: $1) }
     }
 
     // MARK: - URL scheme (threxo://extract|compress?path=…)
@@ -2506,8 +2688,25 @@ final class AppModel: ObservableObject {
         let urls = paths.map { URL(fileURLWithPath: $0) }
         appDbg("handleIncomingURL host=\(url.host ?? "nil") paths=\(urls.count) busy=\(isBusy) idle=\(Int(Date().timeIntervalSince(lastTaskActivity)))s")
         switch url.host {
+        case "progressDemo":
+            // 仅调试：按指定百分比静态展示进度弹窗，用来核对视觉与取消按钮。
+            let query = components?.queryItems ?? []
+            func value(_ name: String) -> String? { query.first { $0.name == name }?.value }
+            debugProgressDemo(
+                kind: value("kind") == "extract" ? .extract : .compress,
+                percent: Int(value("percent") ?? "") ?? 58,
+                totalBytes: Int64(value("total") ?? "") ?? 568_720_000,
+                fileName: value("name") ?? "SP-AMR-CUSTOM_V08-beta1.zip",
+                hold: Double(value("hold") ?? "") ?? 6
+            )
+        case "progressCancel":
+            // 仅调试：等价于点弹窗里的「取消」，验证取消后浮层立即收起。
+            cancelProgressTask()
         case "extract":
             extractAutomatically(urls)
+        case "extractReveal":
+            // 仅调试：复现「双击归档 → 静默解压 → 在访达显示结果」的完整链路。
+            extractAutomatically(urls, revealResult: true)
         case "extractTo":
             // 右键「解压到指定目录…」：先让用户挑目录，挑完静默解。
             chooseDestinationAndExtract(urls)
@@ -2624,6 +2823,19 @@ final class AppModel: ObservableObject {
                    + "anchor=\(extractionAnchorURL?.path ?? "-") "
                    + "dest=\(archiveURL.map { uniqueExtractDestination(for: $0).path } ?? "-") "
                    + "nested=\(nestedChain.count)")
+        case "receiveFiles":
+            // 仅调试：等价于把文件 / 文件夹拖进窗口或拖到 Dock（走 receiveOpenFiles）。
+            MainWindowController.shared.show()
+            receiveOpenFiles(urls)
+            appDbg("debug receiveFiles count=\(urls.count) "
+                   + "compose=\(ComposeArchiveState.shared.isActive) "
+                   + "items=\(ComposeArchiveState.shared.items.count)")
+        case "home":
+            // 仅调试：等价于点解压页左上角的「返回」，验证回到欢迎页。
+            MainWindowController.shared.show()
+            returnToHome()
+            appDbg("debug home archive=\(archiveURL?.path ?? "nil") "
+                   + "compose=\(ComposeArchiveState.shared.isActive)")
         case "closeWindow":
             // 仅调试：验证红绿灯关窗会清掉现场、回到欢迎页。
             MainWindowController.shared.close()
@@ -2633,6 +2845,31 @@ final class AppModel: ObservableObject {
             // 仅调试：走真实的窗口链路解压，验证完成后会自动弹询问卡片。
             MainWindowController.shared.show()
             extractAll()
+        case "debugCompressTo":
+            // 仅调试：跳过系统保存面板，复现「页面内保存压缩包」后的压缩阶段。
+            guard let first = urls.first else { break }
+            let destPath = components?.queryItems?.first(where: { $0.name == "dest" })?.value
+                ?? first.deletingLastPathComponent().appendingPathComponent("页面压缩测试.zip").path
+            MainWindowController.shared.show()
+            compress(sources: urls, to: URL(fileURLWithPath: destPath))
+        case "debugCores":
+            // 仅调试：核对本机核心数、可选档位与当前默认档。
+            appDbg("debugCores physical=\(SettingsStore.coreCount) "
+                   + "options=\(SettingsStore.coreOptions) "
+                   + "maxThreads=\(SettingsStore.shared.maxThreads)")
+            // 再把设置窗口里下拉控件的真实选项打出来，验证 1…n 全都上了屏。
+            if let root = NSApp.windows.first(where: { $0.title == L("千梭设置") })?.contentView {
+                func popups(_ view: NSView) -> [NSPopUpButton] {
+                    var out: [NSPopUpButton] = []
+                    if let p = view as? NSPopUpButton { out.append(p) }
+                    for sub in view.subviews { out += popups(sub) }
+                    return out
+                }
+                for (index, p) in popups(root).enumerated() {
+                    appDbg("debugCores popup[\(index)]=\(p.itemTitles.joined(separator: ","))"
+                           + " selected=\(p.titleOfSelectedItem ?? "-")")
+                }
+            }
         case "extractDone":
             // 仅调试：模拟解压完成卡片，`threxo://extractDone?path=…`。
             guard let archive = urls.first else { break }
@@ -2674,9 +2911,35 @@ final class AppModel: ObservableObject {
             }
         case "settings":
             // 仅调试：`threxo://settings?page=extract` 直接落到某一页，方便逐页核对布局。
-            let page = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                .queryItems?.first(where: { $0.name == "page" })?.value
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+            let page = query?.first(where: { $0.name == "page" })?.value
             SettingsWindowController.shared.show(page: SettingsPage(rawValue: page ?? "") ?? .general)
+            // 仅调试：拉高窗口，一张截图就能看完长设置页底部的「处理器使用」卡片。
+            if let height = query?.first(where: { $0.name == "height" })?.value.flatMap(Double.init),
+               let panel = NSApp.windows.first(where: { $0.title == L("千梭设置") }) {
+                var frame = panel.frame
+                let oldHeight = frame.size.height
+                frame.size.height = CGFloat(height)
+                frame.origin.y = max(0, frame.origin.y - (CGFloat(height) - oldHeight))
+                panel.setFrame(frame, display: true)
+                panel.center()   // 调试截图用：别让窗口停在屏幕边缘，screencapture 会拍不到
+            }
+            // 仅调试：把长设置页滚到底，便于截图核对「处理器使用」卡片。
+            if query?.first(where: { $0.name == "scroll" })?.value == "bottom",
+               let root = NSApp.windows.first(where: { $0.title == L("千梭设置") })?.contentView {
+                func scrollViews(_ view: NSView) -> [NSScrollView] {
+                    var out: [NSScrollView] = []
+                    if let s = view as? NSScrollView { out.append(s) }
+                    for sub in view.subviews { out += scrollViews(sub) }
+                    return out
+                }
+                for s in scrollViews(root) {
+                    let documentHeight = s.documentView?.bounds.height ?? 0
+                    let bottom = max(0, documentHeight - s.contentView.bounds.height)
+                    s.contentView.scroll(to: NSPoint(x: 0, y: bottom))
+                    s.reflectScrolledClipView(s.contentView)
+                }
+            }
         #endif
         default:
             break

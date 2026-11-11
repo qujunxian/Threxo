@@ -53,7 +53,7 @@ final class SevenZipRunner {
         self.executableURL = executableURL
     }
 
-    /// 设置里限制了核心数时，给所有 7zz 命令补上 `-mmt=N`。
+    /// 设置里的核心数（默认 = 本机全部物理核心，最小 1）下发成 7zz 的 `-mmt=N`。
     /// 插在子命令后面，7zz 对 `l` / `t` 这类只读命令会直接忽略它。
     private func effectiveArguments(_ arguments: [String]) -> [String] {
         let limit = SettingsStore.shared.maxThreads

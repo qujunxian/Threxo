@@ -20,9 +20,11 @@ struct ContentView: View {
             // 创建压缩包：切到文件清单页（原型 4-1），攒够内容才能保存。
             if compose.isActive {
                 ComposeArchiveView(state: compose, options: options)
-            } else if model.archiveURL == nil && !model.isBusy {
+            } else if model.archiveURL == nil,
+                      (!model.isBusy || model.taskProgress != nil) {
                 // 没打开归档时按原型 3 走独立的欢迎态：顶部品牌 + 设置入口，
                 // 中央大字与两个主按钮，不显示工具栏和状态栏。
+                // 压缩 / 解压已有统一进度浮层，这里不再切成「空列表 + 底栏进度条」。
                 emptyWindow
             } else {
                 VStack(spacing: 0) {
@@ -93,10 +95,19 @@ struct ContentView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            // 看的是内层包时，标题左侧给一条回外层的路。
+            // 左侧固定一条返回路：内层包回外层，最外层回首页。
+            // 与创建压缩包页左上角的返回按钮保持同一位置、同一套样式。
             if model.isNestedArchive {
                 ThemeIconButton(symbol: "chevron.left", help: L("返回外层压缩包")) {
                     model.closeNestedArchive()
+                }
+            } else {
+                ThemeIconButton(
+                    symbol: "chevron.left",
+                    isEnabled: !model.isBusy,
+                    help: model.isBusy ? L("任务进行中，完成后才能返回") : L("返回首页")
+                ) {
+                    model.returnToHome()
                 }
             }
 
@@ -329,7 +340,9 @@ struct ContentView: View {
 
     private var footer: some View {
         VStack(spacing: 6) {
-            if model.isBusy {
+            // 压缩 / 解压的进度已交给统一浮层（TaskProgressPanel），
+            // 这里只保留列目录、加文件这类短任务的旧式小进度条。
+            if model.isBusy, model.taskProgress == nil {
                 ProgressView(value: Double(model.progress), total: 100) {
                     HStack(spacing: 6) {
                         Text(verbatim: "\(model.statusText) \(model.progress)%")
@@ -391,6 +404,7 @@ struct ContentView: View {
                         help: L("自己挑选解压位置（⇧⌘E）")
                     ) { model.extractChoosingDestination() }
                 }
+                .disabled(model.isBusy)
             } else {
                 HStack(spacing: 8) {
                     statusLabel
