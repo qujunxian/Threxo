@@ -21,6 +21,8 @@ class FinderSync: FIFinderSync {
 
     /// 菜单构建时记下的选中项：点击时 FIFinderSyncController 的选中态可能已失效。
     private var pendingURLs: [URL] = []
+    /// 清理 macOS 辅助文件只针对文件夹，单独记一份，避免和压缩项互相覆盖。
+    private var pendingCleanFolders: [URL] = []
 
     override init() {
         super.init()
@@ -72,6 +74,7 @@ class FinderSync: FIFinderSync {
         FinderSync.dbg("menu kind=\(menuKind.rawValue) targeted=\(FIFinderSyncController.default().targetedURL()?.path ?? "nil") selected=\(selected.count) \(selected.map(\.lastPathComponent))")
         guard !selected.isEmpty else {
             pendingURLs = []
+            pendingCleanFolders = []
             return menu
         }
 
@@ -87,6 +90,7 @@ class FinderSync: FIFinderSync {
             menu.addItem(item(quickTitle, action: #selector(performQuickExtract(_:))))
             menu.addItem(item(L("用千梭解压到…"), action: #selector(performExtractTo(_:))))
             pendingURLs = archives
+            pendingCleanFolders = []
         } else {
             // 普通文件、文件夹、以及混合选择都走压缩：任何内容都能打包。
             let quickTitle: String
@@ -98,6 +102,18 @@ class FinderSync: FIFinderSync {
             menu.addItem(item(quickTitle, action: #selector(performQuickCompress(_:))))
             menu.addItem(item(L("用千梭压缩为…"), action: #selector(performCompressDialog(_:))))
             pendingURLs = selected
+
+            // 选中项里有文件夹时，额外给一条「清理 macOS 辅助文件」：
+            // 把 __MACOSX、.DS_Store、._* 这类跨系统传输的噪音一次清掉。
+            let folders = selected.filter { FinderSync.isDirectory($0) }
+            pendingCleanFolders = folders
+            if !folders.isEmpty {
+                let cleanTitle = folders.count > 1
+                    ? String(format: L("用千梭清理 %d 个文件夹的 macOS 辅助文件"), folders.count)
+                    : L("用千梭清理 macOS 辅助文件")
+                menu.addItem(.separator())
+                menu.addItem(item(cleanTitle, action: #selector(performCleanMacUtils(_:))))
+            }
         }
         return menu
     }
@@ -112,6 +128,11 @@ class FinderSync: FIFinderSync {
     @objc private func performExtractTo(_ sender: AnyObject?) { forward(host: "extractTo") }
     @objc private func performQuickCompress(_ sender: AnyObject?) { forward(host: "compress") }
     @objc private func performCompressDialog(_ sender: AnyObject?) { forward(host: "compressDialog") }
+    @objc private func performCleanMacUtils(_ sender: AnyObject?) {
+        let folders = pendingCleanFolders
+        pendingCleanFolders = []
+        forward(host: "cleanmaceutils", urls: folders)
+    }
 
     /// 优先用菜单构建时记下的那批：点击瞬间 `selectedItemURLs` 偶尔已经是空的。
     private func forward(host: String) {
@@ -119,6 +140,10 @@ class FinderSync: FIFinderSync {
             ? (FIFinderSyncController.default().selectedItemURLs() ?? [])
             : pendingURLs
         pendingURLs = []
+        forward(host: host, urls: urls)
+    }
+
+    private func forward(host: String, urls: [URL]) {
         guard !urls.isEmpty else { return }
 
         var components = URLComponents()
@@ -140,6 +165,12 @@ class FinderSync: FIFinderSync {
             return String(name.dropLast(ext.count + 1))
         }
         return name
+    }
+
+    static func isDirectory(_ url: URL) -> Bool {
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+            && isDir.boolValue
     }
 
     static func isArchive(_ url: URL) -> Bool {

@@ -86,6 +86,15 @@ final class TaskProgressState: ObservableObject {
         return String(format: "%.1f %@ / %.1f %@",
                       Double(processedBytes) / unit, suffix, total / unit, suffix)
     }
+
+    /// 单个字节数的可读格式，清理结果之类只有「一个数」的场景用。
+    static func byteString(_ bytes: Int64) -> String {
+        let value = Double(max(0, bytes))
+        if value >= 1_000_000_000 { return String(format: "%.1f GB", value / 1_000_000_000) }
+        if value >= 1_000_000 { return String(format: "%.1f MB", value / 1_000_000) }
+        if value >= 1_000 { return String(format: "%.1f KB", value / 1_000) }
+        return String(format: "%.0f B", value)
+    }
 }
 
 // MARK: - 弹窗视图

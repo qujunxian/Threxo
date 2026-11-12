@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Combine
+import Darwin
 import FinderSync
 import UniformTypeIdentifiers
 
@@ -659,6 +660,161 @@ final class AppModel: ObservableObject {
             MainWindowController.shared.show()
             ComposeArchiveState.shared.activate(sources: urls)
         }
+    }
+
+    // MARK: - 清理 macOS 辅助文件（访达右键）
+
+    /// 访达右键「用千梭清理 macOS 辅助文件」：递归清掉文件夹里的
+    /// `__MACOSX`、`.DS_Store`、`._*`、`.fseventsd`、`.Trashes`、
+    /// `.Spotlight-V100`、`.TemporaryItems`、`.DocumentRevisions-V100`。
+    /// 只删这些明确目标，不碰其他内容；不跟随符号链接，也不进入 .app 等包内部。
+    func cleanMacAuxiliaryFiles(in folders: [URL]) {
+        guard !folders.isEmpty, !isBusy else { NSSound.beep(); return }
+        let silent = beginSilentRun()
+        statusText = L("正在清理 macOS 辅助文件…")
+        Task.detached(priority: .userInitiated) {
+            let summary = Self.removeMacAuxiliaryFiles(in: folders)
+            await MainActor.run {
+                self.statusText = summary.message
+                guard silent else { return }
+                if summary.failed > 0 {
+                    Notifier.shared.failure(
+                        title: L("清理完成，但有文件没删掉"),
+                        body: summary.message
+                    )
+                } else {
+                    Notifier.shared.success(
+                        title: summary.removed > 0
+                            ? L("macOS 辅助文件已清理")
+                            : L("没有找到 macOS 辅助文件"),
+                        body: summary.message,
+                        reveal: nil
+                    )
+                }
+                self.endSilentRun()
+            }
+        }
+    }
+
+    struct CleanSummary {
+        var removed = 0
+        var failed = 0
+        var bytes: Int64 = 0
+
+        var message: String {
+            if removed == 0 && failed == 0 {
+                return L("这个文件夹里没有 macOS 辅助文件")
+            }
+            if failed == 0 {
+                return String(format: L("已清理 %d 个辅助文件，释放 %@"),
+                              removed, TaskProgressState.byteString(bytes))
+            }
+            return String(format: L("已清理 %d 个，%d 个没删掉"), removed, failed)
+        }
+    }
+
+    /// 只在后台线程调用。返回删除数量、失败数量与释放的字节数。
+    static func removeMacAuxiliaryFiles(in folders: [URL]) -> CleanSummary {
+        let fm = FileManager.default
+        var summary = CleanSummary()
+        // 不碰系统目录与磁盘根：右键 / 或 /System 时递归清 .DS_Store 既慢又危险。
+        let protected: Set<String> = ["/", "/System", "/Library", "/Applications", "/Volumes"]
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey,
+                                         .isSymbolicLinkKey, .isPackageKey, .fileSizeKey]
+
+        for folder in folders {
+            let root = folder.standardizedFileURL
+            guard !protected.contains(root.path), isDirectory(root) else {
+                summary.failed += 1
+                continue
+            }
+            var stack: [URL] = [root]
+            while let dir = stack.popLast() {
+                guard let names = directoryEntryNames(at: dir.path) else {
+                    summary.failed += 1
+                    continue
+                }
+                for name in names {
+                    let url = dir.appendingPathComponent(name)
+                    let values = try? url.resourceValues(forKeys: keys)
+                    // 符号链接一律不碰：删链接没意义，还可能把目标带偏。
+                    if values?.isSymbolicLink == true { continue }
+                    if isMacAuxiliaryName(name) {
+                        if values?.isDirectory == true {
+                            summary.bytes += totalSizeIncludingHidden(url)
+                        } else {
+                            summary.bytes += Int64(values?.fileSize ?? 0)
+                        }
+                        do {
+                            try fm.removeItem(at: url)
+                            summary.removed += 1
+                        } catch {
+                            summary.failed += 1
+                        }
+                        continue
+                    }
+                    // 普通目录才继续下钻；.app 等包内部不动。
+                    if values?.isDirectory == true, values?.isPackage != true {
+                        stack.append(url)
+                    }
+                }
+            }
+        }
+        appDbg("cleanMacUtils removed=\(summary.removed) failed=\(summary.failed) bytes=\(summary.bytes)")
+        return summary
+    }
+
+    /// 目录项的真实名字。`FileManager.contentsOfDirectory` 在 APFS 上会把
+    /// `._foo` 当成 `foo` 的资源分支隐藏掉，只有 POSIX `readdir` 能拿到，
+    /// 而这些文件正是拷到 Windows / Linux 后最碍眼的噪音。
+    private static func directoryEntryNames(at path: String) -> [String]? {
+        guard let dir = opendir(path) else { return nil }
+        defer { closedir(dir) }
+        let offset = MemoryLayout<dirent>.offset(of: \.d_name) ?? 0
+        var names: [String] = []
+        while let entry = readdir(dir) {
+            let name = String(cString: UnsafeRawPointer(entry)
+                .advanced(by: offset)
+                .assumingMemoryBound(to: CChar.self))
+            if name == "." || name == ".." { continue }
+            names.append(name)
+        }
+        return names
+    }
+
+    static func isMacAuxiliaryName(_ name: String) -> Bool {
+        if name == ".DS_Store" || name == "__MACOSX" { return true }
+        if name.hasPrefix("._") { return true }   // AppleDouble
+        switch name {
+        case ".fseventsd", ".Trashes", ".Spotlight-V100",
+             ".TemporaryItems", ".DocumentRevisions-V100":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// 目录大小，包含隐藏文件与 AppleDouble（`.fseventsd`、`__MACOSX` 里
+    /// 全是这类文件，不能复用压缩统计那套 skipsHiddenFiles）。
+    private static func totalSizeIncludingHidden(_ url: URL) -> Int64 {
+        var total: Int64 = 0
+        var stack: [URL] = [url]
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey,
+                                         .isSymbolicLinkKey, .fileSizeKey]
+        while let dir = stack.popLast() {
+            guard let names = directoryEntryNames(at: dir.path) else { continue }
+            for name in names {
+                let child = dir.appendingPathComponent(name)
+                let values = try? child.resourceValues(forKeys: keys)
+                if values?.isSymbolicLink == true { continue }
+                if values?.isDirectory == true {
+                    stack.append(child)
+                } else {
+                    total += Int64(values?.fileSize ?? 0)
+                }
+            }
+        }
+        return total
     }
 
     // MARK: - Extract (UI flows)
@@ -2715,6 +2871,8 @@ final class AppModel: ObservableObject {
             enqueueSilentCompress(urls)
         case "compressDialog":
             beginCompressDialog(urls)
+        case "cleanmaceutils":
+            cleanMacAuxiliaryFiles(in: urls)
         case "add":
             #if DEBUG
             debugAdd(url)
