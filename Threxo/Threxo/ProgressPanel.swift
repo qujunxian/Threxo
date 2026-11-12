@@ -17,10 +17,11 @@ enum TaskProgressKind {
         }
     }
 
+    /// 与 App 顶栏、底栏同一套 SF Symbol：归档用 archivebox，解压用 down.to.line。
     var symbol: String {
         switch self {
-        case .compress: return "doc.zipper"
-        case .extract:  return "square.and.arrow.down"
+        case .compress: return "archivebox"
+        case .extract:  return "arrow.down.to.line"
         }
     }
 }
@@ -96,122 +97,123 @@ struct TaskProgressView: View {
     @ObservedObject private var themeStore = ThemeStore.shared
     let onCancel: () -> Void
 
-    /// 卡片本身尺寸；窗口会多留一圈给阴影，避免系统阴影画出直角。
-    static let cardWidth: CGFloat = 720
-    static let cardHeight: CGFloat = 268
+    /// 卡片尺寸按 App 的紧凑密度来：比原型的 720×268 小一圈，
+    /// 与顶栏 / 底栏控件的字号、间距保持同一视觉节奏。
+    static let cardWidth: CGFloat = 600
+    static let cardHeight: CGFloat = 184
+    /// 与创建页右侧详情图标（14）同一档，不再用原型那种 34 的大圆角。
+    private static let cornerRadius: CGFloat = 14
 
     private var theme: AppTheme { themeStore.theme }
 
     var body: some View {
         card
             .frame(width: Self.cardWidth, height: Self.cardHeight)
-            .shadow(color: Color.black.opacity(0.16), radius: 22, y: 8)
+            .shadow(color: Color.black.opacity(0.10), radius: 14, y: 6)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.clear)
     }
 
     private var card: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 16) {
+            HStack(alignment: .center, spacing: 12) {
                 icon
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(state.kind.title)
-                        .font(.system(size: 24, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.primary)
                     Text(state.fileName)
-                        .font(.system(size: 15))
+                        .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                Spacer(minLength: 12)
+                Spacer(minLength: 10)
                 cancelButton
             }
 
-            Spacer(minLength: 14)
+            Spacer(minLength: 16)
 
-            HStack(spacing: 18) {
-                progressBar
-                    .frame(height: 18)
+            HStack(spacing: 14) {
+                progressBar.frame(height: 8)
                 Text("\(min(max(state.percent, 0), 100))%")
-                    .font(.system(size: 30, weight: .bold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.primary)
                     .monospacedDigit()
-                    .frame(width: 92, alignment: .trailing)
+                    .frame(width: 54, alignment: .trailing)
             }
 
-            Spacer(minLength: 12)
+            Spacer(minLength: 10)
 
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
                 if let summary = state.byteSummary {
                     Text(summary)
-                        .font(.system(size: 15))
+                        .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
                 } else {
                     Text(state.phase)
-                        .font(.system(size: 15))
+                        .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 8)
                 if let item = state.currentItem, !item.isEmpty {
                     Text(item)
-                        .font(.system(size: 11))
+                        .font(.system(size: 10.5))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .frame(maxWidth: 260, alignment: .trailing)
+                        .frame(maxWidth: 220, alignment: .trailing)
                 }
             }
         }
-        .padding(.horizontal, 30)
-        .padding(.vertical, 26)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
         .frame(width: Self.cardWidth, height: Self.cardHeight)
         .background(
-            RoundedRectangle(cornerRadius: 34, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+            RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                .fill(theme.surface)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 34, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                .strokeBorder(theme.surfaceBorder, lineWidth: 1)
         )
     }
 
-    /// 左上角图标：浅灰圆角底座 + 粉紫渐变的 SF Symbol，对应原型里的火箭图标。
+    /// 与创建页右侧的归档图标同一套语言：紫色淡渐变底座 + 单色紫符号。
+    /// 不再用原型里的红紫渐变，也不取系统强调色（避免系统设成蓝色时和主色打架）。
     private var icon: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 17, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 17, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.07))
-                )
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(LinearGradient(
+                    colors: [theme.primaryStart.opacity(0.22), theme.primaryStart.opacity(0.07)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ))
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(theme.primaryStart.opacity(0.14))
             Image(systemName: state.kind.symbol)
-                .font(.system(size: 27, weight: .semibold))
+                .font(.system(size: 19, weight: .regular))
                 .symbolRenderingMode(.monochrome)
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [Color(red: 0.96, green: 0.36, blue: 0.56), theme.primaryEnd],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+                .foregroundStyle(theme.primaryStart.opacity(0.9))
         }
-        .frame(width: 58, height: 58)
+        .frame(width: 40, height: 40)
     }
 
+    /// 取消是「中止操作」，不是删除，按 App 的中性按钮处理：
+    /// 胶囊底 + 细描边 + 常规文字色，与底栏 ActionBar 的按钮同一套尺寸。
     private var cancelButton: some View {
         Button(action: onCancel) {
-            HStack(spacing: 7) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .bold))
+            HStack(spacing: 4) {
+                ThemeIcon(symbol: "xmark", size: 10, weight: .semibold, tone: .secondary)
                 Text(L("取消"))
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(theme.icon)
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 18)
-            .frame(height: 40)
-            .background(Capsule().fill(theme.danger))
+            .padding(.horizontal, 10)
+            .frame(height: theme.controlHeight)
+            .background(Capsule().fill(theme.surface))
+            .overlay(Capsule().strokeBorder(theme.surfaceBorder))
         }
         .buttonStyle(.plain)
         .disabled(state.finished)
@@ -221,9 +223,9 @@ struct TaskProgressView: View {
     private var progressBar: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(theme.primaryStart.opacity(0.14))
+                Capsule().fill(theme.primaryStart.opacity(0.15))
                 Capsule()
-                    .fill(theme.primaryStart)
+                    .fill(theme.primaryGradient)
                     .frame(width: max(0, geo.size.width * CGFloat(min(max(state.percent, 0), 100)) / 100))
             }
         }
@@ -241,7 +243,7 @@ final class TaskProgressPanel: NSObject {
     private var window: NSWindow?
     private var hosting: NSHostingView<TaskProgressView>?
     /// 四周留出阴影余量，透明窗口本身不画系统阴影。
-    private static let shadowInset: CGFloat = 28
+    private static let shadowInset: CGFloat = 20
 
     var isVisible: Bool { window?.isVisible ?? false }
 

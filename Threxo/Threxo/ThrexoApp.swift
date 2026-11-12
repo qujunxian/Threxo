@@ -464,6 +464,12 @@ func snapshotView<V: View>(_ view: V, size: CGSize, to path: String) {
 @MainActor
 func renderProgressPreview(to path: String) {
     let env = ProcessInfo.processInfo.environment
+    // 仅调试：可指定浅色 / 深色外观，核对两套主题下的卡片与文字对比。
+    if env["THREXO_PROGRESS_APPEARANCE"] == "light" {
+        NSApp.appearance = NSAppearance(named: .aqua)
+    } else if env["THREXO_PROGRESS_APPEARANCE"] == "dark" {
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+    }
     let kind: TaskProgressKind = env["THREXO_PROGRESS_KIND"] == "extract" ? .extract : .compress
     let percent = Int(env["THREXO_PROGRESS_PERCENT"] ?? "") ?? 58
     let total = Int64(env["THREXO_PROGRESS_TOTAL"] ?? "") ?? 568_720_000
